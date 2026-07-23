@@ -9,9 +9,11 @@ import pytest
 
 from secondsign.contracts import (
     CONTRACT_VERSION,
+    Finding,
     PluginJudgement,
     PluginVerdict,
     ReasonCode,
+    render,
     run_plugins,
 )
 
@@ -68,7 +70,7 @@ def test_every_failure_mode_escalates_with_a_distinct_reason(view, plugin, expec
     result = run_plugins([plugin], view)
     assert result.verdict is PluginVerdict.DENY
     assert expected_reason in result.reasons
-    assert result.explanation.strip()
+    assert render(result).strip()
 
 
 def test_a_failing_plugin_does_not_suppress_a_healthy_one(view):
@@ -78,8 +80,7 @@ def test_a_failing_plugin_does_not_suppress_a_healthy_one(view):
         def evaluate(self, v):
             return PluginJudgement(
                 verdict=PluginVerdict.DENY,
-                reasons=(ReasonCode.counterparty_risk,),
-                explanation="counterparty band above policy",
+                findings=(Finding(code=ReasonCode.counterparty_risk),),
             )
 
     result = run_plugins([Exploding(), Denier()], view)
@@ -95,8 +96,7 @@ def test_a_failing_plugin_cannot_clear_a_deny_from_another(view):
         def evaluate(self, v):
             return PluginJudgement(
                 verdict=PluginVerdict.DENY,
-                reasons=(ReasonCode.org_policy,),
-                explanation="denied by organisation policy",
+                findings=(Finding(code=ReasonCode.org_policy),),
             )
 
     assert run_plugins([Denier(), ReturnsGarbage()], view).verdict is PluginVerdict.DENY
@@ -146,8 +146,7 @@ def test_a_judgement_from_a_mismatched_version_is_ignored_entirely(view):
         def evaluate(self, v):
             return PluginJudgement(
                 verdict=PluginVerdict.DENY,
-                reasons=(ReasonCode.org_policy,),
-                explanation="denied",
+                findings=(Finding(code=ReasonCode.org_policy),),
             )
 
     result = run_plugins([FutureDenier()], view)
@@ -161,6 +160,4 @@ def test_non_abstain_judgement_requires_reason_and_explanation():
     with pytest.raises(ValidationError):
         PluginJudgement(verdict=PluginVerdict.DENY)
     with pytest.raises(ValidationError):
-        PluginJudgement(verdict=PluginVerdict.DENY, reasons=(ReasonCode.org_policy,))
-    with pytest.raises(ValidationError):
-        PluginJudgement(verdict=PluginVerdict.REVIEW, reasons=(), explanation="   ")
+        PluginJudgement(verdict=PluginVerdict.REVIEW, findings=())

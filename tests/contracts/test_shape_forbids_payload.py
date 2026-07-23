@@ -12,12 +12,12 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from secondsign.contracts import PluginJudgement, PluginVerdict, PolicyView, ReasonCode
+from secondsign.contracts import Finding, PluginJudgement, PluginVerdict, PolicyView, ReasonCode
 
 from .conftest import FINGERPRINT_A, make_view
 
 #: Every model that crosses the plugin boundary.
-PUBLIC_CONTRACT_MODELS = (PolicyView, PluginJudgement)
+PUBLIC_CONTRACT_MODELS = (PolicyView, PluginJudgement, Finding)
 
 #: Field-name fragments that would imply a raw financial or personal value.
 FORBIDDEN_NAME_FRAGMENTS = (
@@ -50,6 +50,8 @@ def test_rejects_unknown_fields(model):
     """extra="forbid" — a plugin cannot smuggle data through an unknown key."""
     if model is PolicyView:
         payload = make_view().model_dump()
+    elif model is Finding:
+        payload = {"code": ReasonCode.org_policy}
     else:
         payload = {"verdict": PluginVerdict.ABSTAIN}
     payload["customer_note"] = "Beneficiary: Jane Roe, acct 4111111111111111"
@@ -110,19 +112,17 @@ def test_reference_fields_reject_anything_but_a_keyed_fingerprint():
             make_view(counterparty_ref=raw)
 
 
-def test_explanation_is_bounded_and_rejects_embedded_identifiers():
-    """Free text is the last payload channel; it is bounded and screened."""
+def test_no_free_text_channel_exists_at_all():
+    """Superseded by CORE-S004: prose no longer crosses the boundary.
+
+    Detail is closed vocabulary plus bounded quantities, so there is nothing
+    to screen — see tests/contracts/test_structured_findings.py.
+    """
     with pytest.raises(ValidationError):
         PluginJudgement(
             verdict=PluginVerdict.DENY,
-            reasons=(ReasonCode.counterparty_risk,),
+            findings=(Finding(code=ReasonCode.counterparty_risk),),
             explanation="blocked for account 4111111111111111",
-        )
-    with pytest.raises(ValidationError):
-        PluginJudgement(
-            verdict=PluginVerdict.DENY,
-            reasons=(ReasonCode.counterparty_risk,),
-            explanation="x" * 5_000,
         )
 
 
@@ -158,9 +158,9 @@ def test_public_contract_field_sets_are_ratcheted():
     assert set(PluginJudgement.model_fields) == {
         "contract_version",
         "verdict",
-        "reasons",
-        "explanation",
+        "findings",
     }
+    assert set(Finding.model_fields) == {"code", "observed", "limit"}
 
 
 def test_money_is_integer_minor_units_only():

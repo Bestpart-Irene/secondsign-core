@@ -16,7 +16,7 @@ Threat references point at [`THREAT_MODEL.md`](THREAT_MODEL.md).
 |---|---|---|---|
 | INV-1 | **Uncertainty denies.** Errors, unknown contract versions, invalid returns, missing context and unavailable dependencies all take the strictest path. Nothing proceeds because a check could not be completed. | A4, A9 | `tests/contracts/test_fail_closed.py` |
 | INV-2 | **Extensions may only tighten.** Combination is a maximum over strictness. No code path returns a verdict weaker than any of its inputs. | A9 | `tests/contracts/test_combine_laws.py`, `tests/contracts/test_no_downgrade.py` |
-| INV-3 | **No free-form data on a boundary.** No published model may carry a mapping, `Any`, or `object` field. Unknown keys are rejected. | A5 | `tests/architecture/test_invariants.py` |
+| INV-3 | **No free-form data on a boundary.** No published model may carry a mapping, `Any`, `object`, or free-text field. Unknown keys are rejected. Extensions report closed vocabulary plus bounded quantities; core writes any human-readable text. | A5 | `tests/architecture/test_invariants.py`, `tests/contracts/test_structured_findings.py` |
 | INV-4 | **Boundary objects are deeply immutable.** Frozen, with immutable containers — shallow freezing is not enough, because an appendable collection lets a caller rewrite the record after the fact. | A5, B1 | `tests/architecture/test_invariants.py`, `tests/contracts/test_immutability.py` |
 | INV-5 | **Raw financial and personal data is unrepresentable.** Identifiers appear only as keyed fingerprints. Money is integer minor units. Field names implying a raw value are rejected. | A1, A5 | `tests/architecture/test_invariants.py` |
 | INV-6 | **Extensions cannot grant permission.** There is no vocabulary for approval in any extension contract — "the plugin cleared this" is not an expressible statement. | A9 | `tests/contracts/test_no_downgrade.py` |
@@ -26,7 +26,7 @@ Threat references point at [`THREAT_MODEL.md`](THREAT_MODEL.md).
 | INV-10 | **Approvals are one-shot, expiring, digest-bound.** Never bound to an agent, a session, or an action type. A missing expiry is treated as expired, not as permanent. | B2, B3 | slice `CORE-S011` |
 | INV-11 | **Audit failure blocks execution.** A receipt that cannot be written is a fail-closed event, not a dropped side effect. Every non-ALLOW path produces a receipt, including error and degraded paths. | A7 | slice `CORE-S013` |
 | INV-12 | **The control plane is unreachable.** Limits, approver roster, idempotency store, audit ledger and fingerprint keys are structurally out of reach of the managed agent, and that judgement depends on no configurable policy. | A2, A3 | slice `CORE-S017` |
-| INV-13 | **Determinism.** Identical inputs produce identical results, including the ordering of reason codes. Extension registration order does not affect the outcome. | A9 | `tests/contracts/test_no_downgrade.py`; strengthened by `CORE-S003` |
+| INV-13 | **Determinism.** Identical inputs produce byte-identical results, including finding order. Extension registration order does not affect the record, not merely the verdict. | A9 | `tests/contracts/test_structured_findings.py`, `tests/contracts/test_combine_laws.py` |
 | INV-14 | **Source trust only ever decreases.** No path upgrades an instruction's provenance. Mixed provenance is treated as its least trusted component. | B9 | slice `CORE-S008` |
 
 ## Why fail-closed means DENY

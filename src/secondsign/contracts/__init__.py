@@ -8,13 +8,15 @@ boundary is enforced in CI by an import contract, not by convention.
 """
 
 from secondsign.contracts.combine import combine, neutral
+from secondsign.contracts.render import render, render_finding
 from secondsign.contracts.runner import PolicyPlugin, run_plugins
 from secondsign.contracts.types import (
     CONTRACT_VERSION,
     FINGERPRINT_PATTERN,
-    MAX_EXPLANATION_LENGTH,
+    MAX_DETAIL_MAGNITUDE,
     ActionClass,
     Currency,
+    Finding,
     Fingerprint,
     MarketSession,
     PluginJudgement,
@@ -30,9 +32,10 @@ from secondsign.contracts.types import (
 __all__ = [
     "CONTRACT_VERSION",
     "FINGERPRINT_PATTERN",
-    "MAX_EXPLANATION_LENGTH",
+    "MAX_DETAIL_MAGNITUDE",
     "ActionClass",
     "Currency",
+    "Finding",
     "Fingerprint",
     "MarketSession",
     "PluginJudgement",
@@ -46,5 +49,7 @@ __all__ = [
     "SourceTrust",
     "combine",
     "neutral",
+    "render",
+    "render_finding",
     "run_plugins",
 ]

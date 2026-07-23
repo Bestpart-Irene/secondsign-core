@@ -1,55 +1,46 @@
 # Copyright 2026 SecondSign contributors
 # SPDX-License-Identifier: Apache-2.0
-"""Combination of plugin judgements — monotone by construction.
+"""Combination of plugin judgements — monotone and canonical by construction.
 
 This is the only place a plugin's opinion meets another's, and therefore the
 only place protection could be weakened. It is written so that no such path
 exists rather than so that no such path is taken: the verdict is a maximum and
-the reasons are a union, and there is no branch that returns anything else.
+the findings are a union, and there is no branch that returns anything else.
+
+The union is *canonically ordered*, not merely deduplicated. Two operators
+running the same extensions in a different registration order must produce
+byte-identical records, or reconciling their audit trails becomes a manual
+exercise even when both denied the same transaction (INV-13).
 """
 
-from secondsign.contracts.types import (
-    MAX_EXPLANATION_LENGTH,
-    PluginJudgement,
-    PluginVerdict,
-    ReasonCode,
-)
+from secondsign.contracts.types import Finding, PluginJudgement, PluginVerdict
 
 
-def _merge_reasons(
-    left: tuple[ReasonCode, ...], right: tuple[ReasonCode, ...]
-) -> tuple[ReasonCode, ...]:
-    """Order-preserving union, left first. Deduplicated — a code repeated by
-    two plugins is one finding, not two."""
-    return tuple(dict.fromkeys((*left, *right)))
+def _merge_findings(left: tuple[Finding, ...], right: tuple[Finding, ...]) -> tuple[Finding, ...]:
+    """Deduplicated union in canonical order.
 
-
-def _merge_explanations(left: str, right: str) -> str:
-    parts = [part for part in (left.strip(), right.strip()) if part]
-    merged = " ".join(dict.fromkeys(parts))
-    if len(merged) > MAX_EXPLANATION_LENGTH:
-        # Truncate rather than reject: a long chain of findings must not be
-        # able to make combination fail, which would be a denial path.
-        merged = merged[: MAX_EXPLANATION_LENGTH - 1].rstrip() + "…"
-    return merged
+    Two findings are the same only if their code *and* their quantities match:
+    "velocity 9" and "velocity 40" are two observations, and collapsing them
+    would lose the larger one from the record.
+    """
+    unique = {finding.sort_key(): finding for finding in (*left, *right)}
+    return tuple(unique[key] for key in sorted(unique))
 
 
 def combine(left: PluginJudgement, right: PluginJudgement) -> PluginJudgement:
-    """The stricter of two judgements, with both sets of reasons kept.
+    """The stricter of two judgements, with both sets of findings kept.
 
     Monotone: the result is never below either input on the strictness
-    ordering. Commutative and associative in strictness, idempotent, with
-    ABSTAIN as the identity element — all asserted as laws in the tests, not
-    just by example.
+    ordering. Commutative, associative, idempotent, with ABSTAIN as the
+    identity element — asserted as laws in the tests, not just by example.
 
-    Reason codes are carried through rather than summarised: they are the audit
+    Findings are carried through rather than summarised: they are the audit
     trail, and a finding that disappears on combination cannot be reviewed.
     """
     verdict = left.verdict if left.verdict >= right.verdict else right.verdict
     return PluginJudgement(
         verdict=verdict,
-        reasons=_merge_reasons(left.reasons, right.reasons),
-        explanation=_merge_explanations(left.explanation, right.explanation),
+        findings=_merge_findings(left.findings, right.findings),
     )
 
 

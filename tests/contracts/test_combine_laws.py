@@ -8,7 +8,14 @@ idempotent, monotone, with ABSTAIN as the identity element.
 from hypothesis import given
 from hypothesis import strategies as st
 
-from secondsign.contracts import PluginJudgement, PluginVerdict, ReasonCode, combine
+from secondsign.contracts import (
+    Finding,
+    PluginJudgement,
+    PluginVerdict,
+    ReasonCode,
+    combine,
+    render,
+)
 
 STRICTNESS = {PluginVerdict.ABSTAIN: 0, PluginVerdict.REVIEW: 1, PluginVerdict.DENY: 2}
 
@@ -19,8 +26,7 @@ def _judgement(verdict: PluginVerdict, reasons: tuple[ReasonCode, ...]) -> Plugi
     reasons = reasons or (ReasonCode.org_policy,)
     return PluginJudgement(
         verdict=verdict,
-        reasons=reasons,
-        explanation="policy condition met",
+        findings=tuple(Finding(code=code) for code in dict.fromkeys(reasons)),
     )
 
 
@@ -70,15 +76,22 @@ def test_reasons_are_preserved_not_summarised(a, b):
 
 
 @given(judgements, judgements)
-def test_reasons_are_deduplicated_and_ordered(a, b):
+def test_findings_are_deduplicated_and_canonically_ordered(a, b):
     result = combine(a, b)
-    assert len(result.reasons) == len(set(result.reasons))
-    assert isinstance(result.reasons, tuple)
+    assert len(result.findings) == len(set(result.findings))
+    assert isinstance(result.findings, tuple)
+    assert list(result.findings) == sorted(result.findings, key=lambda f: f.sort_key())
 
 
 @given(judgements, judgements)
 def test_combination_never_produces_an_unexplained_non_abstain(a, b):
     result = combine(a, b)
     if result.verdict is not PluginVerdict.ABSTAIN:
-        assert result.reasons
-        assert result.explanation.strip()
+        assert result.findings
+        assert render(result).strip()
+
+
+@given(judgements, judgements)
+def test_combination_is_byte_identical_under_reordering(a, b):
+    """INV-13 — stronger than set equality: the records must match exactly."""
+    assert combine(a, b).model_dump_json() == combine(b, a).model_dump_json()
