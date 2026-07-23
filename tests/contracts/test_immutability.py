@@ -9,7 +9,7 @@ collection field must be an immutable container.
 import pytest
 from pydantic import ValidationError
 
-from secondsign.contracts import PluginJudgement, PluginVerdict, PolicyView, ReasonCode
+from secondsign.contracts import Finding, PluginJudgement, PluginVerdict, PolicyView, ReasonCode
 
 from .conftest import make_view
 
@@ -22,42 +22,36 @@ def test_view_attributes_cannot_be_rebound(view):
 def test_judgement_attributes_cannot_be_rebound():
     judgement = PluginJudgement(
         verdict=PluginVerdict.REVIEW,
-        reasons=(ReasonCode.velocity_limit,),
-        explanation="velocity above the configured window",
+        findings=(Finding(code=ReasonCode.velocity_limit),),
     )
     with pytest.raises(ValidationError):
         judgement.verdict = PluginVerdict.ABSTAIN
 
 
-def test_reason_collection_is_an_immutable_container():
+def test_finding_collection_is_an_immutable_container():
     judgement = PluginJudgement(
         verdict=PluginVerdict.DENY,
-        reasons=(ReasonCode.counterparty_risk,),
-        explanation="counterparty band above policy",
+        findings=(Finding(code=ReasonCode.counterparty_risk),),
     )
-    assert isinstance(judgement.reasons, tuple)
+    assert isinstance(judgement.findings, tuple)
     with pytest.raises(TypeError):
-        judgement.reasons[0] = ReasonCode.velocity_limit
+        judgement.findings[0] = Finding(code=ReasonCode.velocity_limit)
     with pytest.raises(AttributeError):
-        judgement.reasons.append(ReasonCode.velocity_limit)
+        judgement.findings.append(Finding(code=ReasonCode.velocity_limit))
 
 
 def test_a_supplied_list_cannot_alias_into_the_model():
     """Passing a list must copy, not alias — else the caller keeps a handle."""
-    supplied = [ReasonCode.velocity_limit]
-    judgement = PluginJudgement(
-        verdict=PluginVerdict.REVIEW,
-        reasons=supplied,
-        explanation="velocity above the configured window",
-    )
-    supplied.append(ReasonCode.counterparty_risk)
-    assert judgement.reasons == (ReasonCode.velocity_limit,)
+    supplied = [Finding(code=ReasonCode.velocity_limit)]
+    judgement = PluginJudgement(verdict=PluginVerdict.REVIEW, findings=supplied)
+    supplied.append(Finding(code=ReasonCode.counterparty_risk))
+    assert judgement.findings == (Finding(code=ReasonCode.velocity_limit),)
 
 
 @pytest.mark.parametrize(
     "model_fields",
-    [PolicyView.model_fields, PluginJudgement.model_fields],
-    ids=["PolicyView", "PluginJudgement"],
+    [PolicyView.model_fields, PluginJudgement.model_fields, Finding.model_fields],
+    ids=["PolicyView", "PluginJudgement", "Finding"],
 )
 def test_no_field_is_a_mutable_container(model_fields):
     for name, field in model_fields.items():
@@ -67,7 +61,7 @@ def test_no_field_is_a_mutable_container(model_fields):
 
 
 def test_every_model_declares_frozen_and_forbid():
-    for model in (PolicyView, PluginJudgement):
+    for model in (PolicyView, PluginJudgement, Finding):
         assert model.model_config.get("frozen") is True, model.__name__
         assert model.model_config.get("extra") == "forbid", model.__name__
 

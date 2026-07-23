@@ -34,8 +34,10 @@ from typing import Any
 
 from secondsign.contracts import (
     CONTRACT_VERSION,
+    MAX_DETAIL_MAGNITUDE,
     ActionClass,
     Currency,
+    Finding,
     MarketSession,
     PluginJudgement,
     PluginVerdict,
@@ -45,6 +47,7 @@ from secondsign.contracts import (
     Reversibility,
     RiskBand,
     SourceTrust,
+    render,
     run_plugins,
 )
 
@@ -112,8 +115,7 @@ class _AlwaysDeny:
     def evaluate(self, view: PolicyView) -> PluginJudgement:
         return PluginJudgement(
             verdict=PluginVerdict.DENY,
-            reasons=(ReasonCode.org_policy,),
-            explanation="Denied by a conformance fixture.",
+            findings=(Finding(code=ReasonCode.org_policy),),
         )
 
 
@@ -215,20 +217,37 @@ class PolicyPluginConformance:
 
     # -- leakage -------------------------------------------------------------
 
-    def test_does_not_echo_identifiers_it_was_shown(self):
-        """INV-5. A fingerprint in an explanation ends up in a receipt."""
-        for view, result in self._judgements():
-            for identifier in (view.counterparty_ref, view.source_account_ref):
-                assert identifier not in result.explanation, (
-                    "plugin echoed a reference identifier into its explanation"
+    def test_findings_stay_within_the_closed_vocabulary(self):
+        """INV-5. Text leakage is structurally impossible since CORE-S004 —
+        there is no prose field to echo an identifier into.
+
+        What remains checkable is the quantity bound. Pydantic validation can
+        be bypassed with ``model_construct``, so the emitted values are
+        verified here rather than trusted: a quantity large enough to hold an
+        account number is a leak whatever route produced it.
+        """
+        for _, result in self._judgements():
+            for finding in result.findings:
+                assert isinstance(finding.code, ReasonCode), (
+                    f"finding carries {finding.code!r}, which is not a published reason code"
                 )
+                for quantity in (finding.observed, finding.limit):
+                    if quantity is None:
+                        continue
+                    assert isinstance(quantity, int) and not isinstance(quantity, bool), (
+                        "finding quantities must be integers"
+                    )
+                    assert 0 <= quantity <= MAX_DETAIL_MAGNITUDE, (
+                        f"finding quantity {quantity} is outside the published bound — "
+                        "large enough to carry an identifier"
+                    )
 
     def test_every_concern_is_actionable(self):
         """A non-ABSTAIN verdict nobody can act on is not a concern."""
         for _, result in self._judgements():
             if result.verdict is not PluginVerdict.ABSTAIN:
-                assert result.reasons, "non-abstaining judgement carries no reason code"
-                assert result.explanation.strip(), "non-abstaining judgement carries no explanation"
+                assert result.findings, "non-abstaining judgement carries no finding"
+                assert render(result).strip(), "non-abstaining judgement renders to nothing"
 
     # -- composition ---------------------------------------------------------
 

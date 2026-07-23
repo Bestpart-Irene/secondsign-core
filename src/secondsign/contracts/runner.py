@@ -15,6 +15,7 @@ from typing import Protocol, runtime_checkable
 from secondsign.contracts.combine import combine, neutral
 from secondsign.contracts.types import (
     CONTRACT_VERSION,
+    Finding,
     PluginJudgement,
     PluginVerdict,
     PolicyView,
@@ -42,7 +43,7 @@ class PolicyPlugin(Protocol):
     def evaluate(self, view: PolicyView) -> PluginJudgement: ...
 
 
-def _deny(reason: ReasonCode, explanation: str) -> PluginJudgement:
+def _deny(reason: ReasonCode) -> PluginJudgement:
     """The response to a plugin that cannot be trusted to have answered.
 
     DENY, not an escalation (INV-1). A plugin that failed might have been the
@@ -55,7 +56,7 @@ def _deny(reason: ReasonCode, explanation: str) -> PluginJudgement:
     declared degraded state, not by softening the verdict. See
     ``docs/INVARIANTS.md``.
     """
-    return PluginJudgement(verdict=PluginVerdict.DENY, reasons=(reason,), explanation=explanation)
+    return PluginJudgement(verdict=PluginVerdict.DENY, findings=(Finding(code=reason),))
 
 
 def _evaluate_isolated(plugin: object, view: PolicyView) -> PluginJudgement:
@@ -71,17 +72,11 @@ def _evaluate_isolated(plugin: object, view: PolicyView) -> PluginJudgement:
             declared,
             CONTRACT_VERSION,
         )
-        return _deny(
-            ReasonCode.plugin_contract_mismatch,
-            "A plugin declares an unrecognised contract version and was not consulted.",
-        )
+        return _deny(ReasonCode.plugin_contract_mismatch)
 
     evaluate = getattr(plugin, "evaluate", None)
     if not callable(evaluate):
-        return _deny(
-            ReasonCode.plugin_contract_mismatch,
-            "A plugin does not implement the evaluation contract.",
-        )
+        return _deny(ReasonCode.plugin_contract_mismatch)
 
     try:
         result = evaluate(view)
@@ -90,21 +85,12 @@ def _evaluate_isolated(plugin: object, view: PolicyView) -> PluginJudgement:
         # deliberately not caught: it must unwind, and an unwind is fail-closed
         # by construction because nothing downstream runs without a decision.
         logger.warning("plugin %s raised during evaluation", type(plugin).__name__, exc_info=True)
-        return _deny(
-            ReasonCode.plugin_error,
-            "A plugin failed during evaluation; denying.",
-        )
+        return _deny(ReasonCode.plugin_error)
 
     if not isinstance(result, PluginJudgement):
-        return _deny(
-            ReasonCode.plugin_invalid_result,
-            "A plugin returned a value that is not a judgement.",
-        )
+        return _deny(ReasonCode.plugin_invalid_result)
     if result.contract_version != CONTRACT_VERSION:
-        return _deny(
-            ReasonCode.plugin_contract_mismatch,
-            "A plugin returned a judgement in an unrecognised contract version.",
-        )
+        return _deny(ReasonCode.plugin_contract_mismatch)
     return result
 
 

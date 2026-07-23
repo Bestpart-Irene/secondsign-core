@@ -14,7 +14,7 @@ stays quiet.
 
 ```python
 from secondsign.contracts import (
-    CONTRACT_VERSION, PluginJudgement, PluginVerdict, PolicyView,
+    CONTRACT_VERSION, Finding, PluginJudgement, PluginVerdict, PolicyView,
     ReasonCode, RiskBand,
 )
 
@@ -26,8 +26,7 @@ class BlockProhibitedCounterparties:
         if view.counterparty_risk_band is RiskBand.prohibited:
             return PluginJudgement(
                 verdict=PluginVerdict.DENY,
-                reasons=(ReasonCode.counterparty_risk,),
-                explanation="Counterparty risk band is prohibited by policy.",
+                findings=(Finding(code=ReasonCode.counterparty_risk),),
             )
         return PluginJudgement(verdict=PluginVerdict.ABSTAIN)
 ```
@@ -54,8 +53,9 @@ Run your own test suite. That subclass is the entire integration.
 | Does not mutate the view | Judging must not change what the next layer sees |
 | Is deterministic | INV-13 — same input, same output, same reason ordering |
 | Has no side effects across views | State between evaluations makes decisions depend on traffic order |
-| Does not echo identifiers it was shown | INV-5 — a fingerprint in an explanation ends up in a receipt |
+| Findings stay within the closed vocabulary | INV-5 — quantities are bounded below identifier magnitude, and verified on emission because `model_construct` bypasses validation |
 | Every concern is actionable | A verdict nobody can act on is not a concern |
+| Registration order gives byte-identical records | INV-13 — reconciling two operators' audit trails must not be manual |
 | Cannot weaken another extension | INV-2 |
 | Registration order does not change the outcome | Two operators with the same plugins get the same answer |
 | A failing neighbour does not suppress it | One broken extension must not silence a healthy one |
@@ -65,6 +65,13 @@ unsettled value bands, every risk band, trust level, action class, rail class,
 market session and currency.
 
 ## Rules that are not negotiable
+
+**You do not write prose.** A finding is a `ReasonCode` plus optional bounded
+quantities; core writes the sentence. A bounded, screened text field was tried
+and removed — an author who wants to pass a customer name through will
+eventually phrase it within the limit. Quantities are capped below the
+magnitude of a 13-digit account number, so a number cannot carry an identifier
+either. If a condition you need has no reason code, propose one.
 
 **You cannot approve anything.** `PluginVerdict` has `ABSTAIN`, `REVIEW` and
 `DENY`. There is no `ALLOW`, so "my plugin cleared this payment" is not an

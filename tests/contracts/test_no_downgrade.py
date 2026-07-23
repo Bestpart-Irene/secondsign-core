@@ -7,7 +7,13 @@ statement in this contract.
 
 import pytest
 
-from secondsign.contracts import PluginJudgement, PluginVerdict, ReasonCode, run_plugins
+from secondsign.contracts import (
+    Finding,
+    PluginJudgement,
+    PluginVerdict,
+    ReasonCode,
+    run_plugins,
+)
 
 
 class StubPlugin:
@@ -17,9 +23,7 @@ class StubPlugin:
         self._judgement = (
             PluginJudgement(verdict=verdict)
             if verdict is PluginVerdict.ABSTAIN
-            else PluginJudgement(
-                verdict=verdict, reasons=(reason,), explanation="policy condition met"
-            )
+            else PluginJudgement(verdict=verdict, findings=(Finding(code=reason),))
         )
 
     def evaluate(self, view):

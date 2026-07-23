@@ -9,6 +9,8 @@ import pytest
 from secondsign.conformance import PolicyPluginConformance
 from secondsign.contracts import (
     CONTRACT_VERSION,
+    MAX_DETAIL_MAGNITUDE,
+    Finding,
     PluginJudgement,
     PluginVerdict,
     PolicyView,
@@ -26,14 +28,16 @@ class WellBehavedPlugin:
         if view.counterparty_risk_band is RiskBand.prohibited:
             return PluginJudgement(
                 verdict=PluginVerdict.DENY,
-                reasons=(ReasonCode.counterparty_risk,),
-                explanation="Counterparty risk band is prohibited by policy.",
+                findings=(Finding(code=ReasonCode.counterparty_risk),),
             )
         if view.recent_count_window > 5:
             return PluginJudgement(
                 verdict=PluginVerdict.REVIEW,
-                reasons=(ReasonCode.velocity_limit,),
-                explanation="Recent activity exceeds the configured window.",
+                findings=(
+                    Finding(
+                        code=ReasonCode.velocity_limit, observed=view.recent_count_window, limit=5
+                    ),
+                ),
             )
         return PluginJudgement(verdict=PluginVerdict.ABSTAIN)
 
@@ -58,20 +62,31 @@ class Stateful:
         if self._seen > 3:
             return PluginJudgement(
                 verdict=PluginVerdict.REVIEW,
-                reasons=(ReasonCode.velocity_limit,),
-                explanation="Too many evaluations in this process.",
+                findings=(Finding(code=ReasonCode.velocity_limit),),
             )
         return PluginJudgement(verdict=PluginVerdict.ABSTAIN)
 
 
-class EchoesIdentifiers:
+class SmugglesAnIdentifier:
+    """Bypasses validation with model_construct to carry a card-shaped number.
+
+    Since CORE-S004 there is no prose field to echo an identifier into, so the
+    remaining leak route is an out-of-bounds quantity built without validation.
+    The kit checks emitted values rather than trusting the model.
+    """
+
     contract_version = CONTRACT_VERSION
 
     def evaluate(self, view):
-        return PluginJudgement(
+        smuggled = Finding.model_construct(
+            code=ReasonCode.org_policy,
+            observed=MAX_DETAIL_MAGNITUDE + 4111111111111111,
+            limit=None,
+        )
+        return PluginJudgement.model_construct(
+            contract_version=CONTRACT_VERSION,
             verdict=PluginVerdict.REVIEW,
-            reasons=(ReasonCode.org_policy,),
-            explanation=f"Flagged {view.counterparty_ref}",
+            findings=(smuggled,),
         )
 
 
@@ -106,12 +121,12 @@ def _run(suite_cls, plugin, method: str) -> None:
     ("plugin", "method"),
     [
         (Stateful(), "test_has_no_side_effects_across_views"),
-        (EchoesIdentifiers(), "test_does_not_echo_identifiers_it_was_shown"),
+        (SmugglesAnIdentifier(), "test_findings_stay_within_the_closed_vocabulary"),
         (WrongVersion(), "test_declares_the_supported_contract_version"),
         (Crashes(), "test_never_trips_the_runner_failure_paths"),
         (ReturnsGarbage(), "test_never_trips_the_runner_failure_paths"),
     ],
-    ids=["stateful", "echoes-identifiers", "wrong-version", "crashes", "returns-garbage"],
+    ids=["stateful", "smuggles-identifier", "wrong-version", "crashes", "returns-garbage"],
 )
 def test_kit_rejects_non_conformant_plugins(plugin, method):
     with pytest.raises(AssertionError):

@@ -12,7 +12,6 @@ cannot be handed an account number, because a reference field accepts only a
 keyed fingerprint. Neither is a rule someone has to remember to follow.
 """
 
-import re
 from enum import IntEnum, StrEnum
 from typing import Annotated
 
@@ -27,13 +26,13 @@ CONTRACT_VERSION = 1
 #: discouraged.
 FINGERPRINT_PATTERN = r"^fp:[0-9a-f]{64}$"
 
-#: Free text is the last channel through which a payload could reach a log or a
-#: receipt, so it is bounded and screened.
-MAX_EXPLANATION_LENGTH = 200
-
-#: A run this long is an account number, a card number, or a reference — not
-#: prose. Screened out of explanations.
-_DIGIT_RUN = re.compile(r"\d{12,}")
+#: Upper bound on any numeric detail an extension may attach to a finding.
+#:
+#: One trillion minor units is ten billion major units — far above any genuine
+#: transaction limit or velocity count, and deliberately below the magnitude of
+#: a 13-or-more-digit account or card number. An extension therefore cannot
+#: encode an identifier in a quantity field (threat A5).
+MAX_DETAIL_MAGNITUDE = 1_000_000_000_000
 
 Fingerprint = Annotated[str, Field(pattern=FINGERPRINT_PATTERN)]
 
@@ -187,31 +186,62 @@ class PolicyView(BaseModel):
         return self
 
 
+class Finding(BaseModel):
+    """One thing an extension observed, in closed vocabulary.
+
+    No prose. A bounded, screened text field is still a text field, and an
+    author who wants to pass a customer name through will eventually phrase it
+    within the limit. The extension states *what* it found; core writes the
+    sentence (see :mod:`secondsign.contracts.render`).
+
+    ``observed`` and ``limit`` are optional quantities that make a finding
+    reviewable — "velocity 9 against a limit of 5" rather than a bare code.
+    Both are bounded so a quantity cannot carry an identifier.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    code: ReasonCode
+    #: What the extension measured, if the finding is quantitative.
+    observed: int | None = Field(default=None, ge=0, le=MAX_DETAIL_MAGNITUDE)
+    #: What it was measured against.
+    limit: int | None = Field(default=None, ge=0, le=MAX_DETAIL_MAGNITUDE)
+
+    def sort_key(self) -> tuple[str, int, int]:
+        """Total order over findings, so records are canonical (INV-13).
+
+        ``-1`` stands in for absent so a finding without a quantity sorts
+        before the same code with one, deterministically.
+        """
+        return (
+            self.code.value,
+            self.observed if self.observed is not None else -1,
+            self.limit if self.limit is not None else -1,
+        )
+
+
 class PluginJudgement(BaseModel):
     """What a plugin returns.
 
-    An ABSTAIN needs nothing. Anything stronger must carry a stable reason code
-    and a human explanation — a concern nobody can act on is not a concern.
+    An ABSTAIN needs nothing. Anything stronger must carry at least one
+    finding — a concern nobody can act on is not a concern.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     contract_version: int = CONTRACT_VERSION
     verdict: PluginVerdict
-    #: Tuple, not list: `frozen=True` is shallow, and an appendable reason list
+    #: Tuple, not list: `frozen=True` is shallow, and an appendable collection
     #: would let a plugin rewrite the audit story after the fact.
-    reasons: tuple[ReasonCode, ...] = ()
-    explanation: str = ""
+    findings: tuple[Finding, ...] = ()
+
+    @property
+    def reasons(self) -> tuple[ReasonCode, ...]:
+        """The distinct reason codes, in finding order. Derived, not stored."""
+        return tuple(dict.fromkeys(finding.code for finding in self.findings))
 
     @model_validator(mode="after")
     def _concerns_must_be_actionable(self) -> "PluginJudgement":
-        if self.verdict is not PluginVerdict.ABSTAIN:
-            if not self.reasons:
-                raise ValueError(f"a {self.verdict.name} judgement requires a reason code")
-            if not self.explanation.strip():
-                raise ValueError(f"a {self.verdict.name} judgement requires an explanation")
-        if len(self.explanation) > MAX_EXPLANATION_LENGTH:
-            raise ValueError(f"explanation exceeds {MAX_EXPLANATION_LENGTH} characters")
-        if _DIGIT_RUN.search(self.explanation):
-            raise ValueError("explanation contains an identifier-shaped digit run")
+        if self.verdict is not PluginVerdict.ABSTAIN and not self.findings:
+            raise ValueError(f"a {self.verdict.name} judgement requires at least one finding")
         return self
