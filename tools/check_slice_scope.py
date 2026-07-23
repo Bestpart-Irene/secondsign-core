@@ -42,6 +42,13 @@ ROADMAP = REPO_ROOT / "docs" / "slices" / "roadmap.yaml"
 
 SLICE_ID_PATTERN = re.compile(r"[A-Z][A-Z0-9]*-S\d{3}")
 
+# Branch prefixes that carry a slice, per AGENTS.md §6. `docs/` and `chore/`
+# branches deliberately have no slice id — repository housekeeping is not a
+# change to the decision path and has no threat coverage to declare. Requiring
+# an id there would push contributors to invent one, which is worse than no
+# gate: it makes the manifest a formality instead of a promise.
+SLICE_BRANCH_PREFIXES = ("feat/", "fix/")
+
 # Declaring scope is itself part of doing a slice, so a branch may always add or
 # amend a manifest. Everything else must be listed.
 ALWAYS_IN_SCOPE = ("docs/slices/**",)
@@ -149,10 +156,15 @@ def load_slice(slice_id: str) -> dict[str, object] | None:
 def main(argv: list[str]) -> int:
     slice_id = resolve_slice_id(argv)
     if slice_id is None:
+        branch = current_branch()
+        if not branch.startswith(SLICE_BRANCH_PREFIXES):
+            print(f"ok: {branch or 'this branch'} carries no slice; nothing to check")
+            return 0
         print(
-            "No slice id given, and none found in the branch name.\n"
-            "Name the branch feat/<SLICE-ID>/<slug>, pass the id as an argument,\n"
-            "or set SLICE_ID. A change with no declared scope is not a slice."
+            f"FAIL: {branch} is a slice branch with no slice id.\n"
+            "Name it feat/<SLICE-ID>/<slug>, pass the id as an argument, or set\n"
+            "SLICE_ID. A change to the decision path with no declared scope is\n"
+            "not a slice."
         )
         return 1
 
