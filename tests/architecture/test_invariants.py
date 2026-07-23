@@ -1,3 +1,5 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
 """Architecture invariants, enforced against the whole package.
 
 These tests discover every model in `secondsign` rather than naming a fixed

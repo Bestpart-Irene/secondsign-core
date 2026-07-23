@@ -1,3 +1,5 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
 """Immutability, including through nested containers.
 
 `frozen=True` is shallow in pydantic: it stops attribute rebinding but not

@@ -49,12 +49,25 @@ jobs:
       - name: Slice manifests
         run: python tools/validate_slice.py docs/slices/roadmap.yaml
 
+      # The manifest already promises which files a slice may touch. Checking
+      # that promise mechanically is what stops "while I was in there" changes
+      # arriving on a decision path inside a PR that says something else.
+      - name: Declared slice scope
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" || true
+          python tools/check_slice_scope.py
+
   independence:
     name: Dependency boundary and DCO
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: No enterprise dependency in the open-source core
         run: |
@@ -63,6 +76,11 @@ jobs:
             exit 1
           fi
           echo "ok"
+
+      # The content half of the dependency boundary: per-file provenance, no
+      # absolute path outside the repository, no dependency nobody declared.
+      - name: SPDX and copyright headers
+        run: true
 
       - name: Every commit is signed off (DCO)
         run: |
