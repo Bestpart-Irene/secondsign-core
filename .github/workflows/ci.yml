@@ -1,0 +1,126 @@
+name: CI
+
+# Every gate a slice can declare runs here. A contributor should never have to
+# ask whether a change is acceptable: if CI is green and the slice manifest
+# validates, the security boundary is intact by construction.
+
+on:
+  push:
+    branches: ["main", "feat/**", "fix/**", "docs/**", "chore/**"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, types, tests, boundaries
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+      - name: Format
+        run: ruff format --check .
+      - name: Types
+        run: mypy src
+
+      - name: Tests (unit, properties, contracts, conformance, architecture)
+        run: pytest --cov=secondsign --cov-report=term-missing --cov-fail-under=90
+
+      - name: Import and architecture boundaries
+        run: lint-imports
+
+      - name: Slice manifests
+        run: python tools/validate_slice.py docs/slices/roadmap.yaml
+
+  independence:
+    name: Dependency boundary and DCO
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: No enterprise dependency in the open-source core
+        run: |
+          if grep -rn "secondsign_enterprise" --include="*.py" src/; then
+            echo "FAIL: core references the enterprise package"
+            exit 1
+          fi
+          echo "ok"
+
+      - name: Every commit is signed off (DCO)
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          if [ -z "$base" ]; then echo "not a pull request; skipping"; exit 0; fi
+          missing=0
+          for sha in $(git rev-list "$base..$head"); do
+            if ! git log -1 --format=%B "$sha" | grep -qi "^Signed-off-by:"; then
+              echo "missing DCO sign-off: $sha $(git log -1 --format=%s "$sha")"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
+  package:
+    name: Build and licence report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip build twine pip-licenses
+      - name: Build wheel and sdist
+        run: python -m build
+      - name: Check distribution metadata
+        run: twine check dist/*
+      - name: LICENSE ships in the distribution
+        run: |
+          python - <<'PY'
+          import pathlib, zipfile, sys
+          wheel = next(pathlib.Path("dist").glob("*.whl"))
+          names = zipfile.ZipFile(wheel).namelist()
+          if not any(n.endswith("LICENSE") for n in names):
+              sys.exit(f"FAIL: no LICENSE in {wheel.name}")
+          print("ok:", wheel.name)
+          PY
+      - name: Dependency licences
+        run: |
+          pip install .
+          pip-licenses --format=json > licenses.json
+          python - <<'PY'
+          import json, sys
+          blocked = ("GPL", "AGPL", "SSPL", "BUSL", "UNKNOWN")
+          bad = [
+              p for p in json.load(open("licenses.json"))
+              if any(b in (p["License"] or "UNKNOWN").upper() for b in blocked)
+              and not (p["License"] or "").upper().startswith("LGPL")
+          ]
+          for p in bad:
+              print("policy-incompatible:", p["Name"], p["License"])
+          sys.exit(1 if bad else 0)
+          PY

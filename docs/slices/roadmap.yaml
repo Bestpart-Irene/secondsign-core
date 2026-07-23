@@ -1,0 +1,240 @@
+# The public build plan.
+#
+# This is the queue any contributor — human or agent — can pick from. Status
+# is derived from Git, not stored here: a slice is complete when its
+# acceptance tests exist and pass on the default branch. That keeps the plan
+# declarative and stops it drifting from reality.
+#
+# Validate with: python tools/validate_slice.py docs/slices/roadmap.yaml
+#
+# This roadmap covers engineering only. Commercial planning is not public.
+
+schema_version: 1
+
+slices:
+  - id: CORE-S001
+    title: Initialize the core repository
+    depends_on: []
+    threats: []
+    scope: ["*"]
+    forbidden: []
+    acceptance:
+      - history begins at this repository's own initial commit
+      - DCO enforced from the first commit
+    required_tests: []
+    gates: [ruff_check, ruff_format]
+    stop_for_human: false
+
+  - id: CORE-S002
+    title: Policy plugin contract candidate
+    depends_on: [CORE-S001]
+    threats: [A5, A9]
+    scope: ["src/secondsign/contracts/**", "tests/contracts/**"]
+    forbidden: [free-form mappings, raw account identifiers]
+    acceptance:
+      - closed immutable boundary models
+      - plugins have no approval vocabulary
+      - combination is monotone and property-tested
+    required_tests: [unit, properties, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false
+
+  - id: CORE-S003
+    title: Public contribution protocol and conformance kit
+    depends_on: [CORE-S002]
+    threats: [A5, A8, A9]
+    scope: ["docs/**", "src/secondsign/conformance/**", "tests/architecture/**", "tests/conformance/**", "tools/**", ".github/**"]
+    forbidden: [dependence on any private repository for build rules]
+    acceptance:
+      - invariants are documented and each is bound to an enforcing test
+      - a third party can certify an extension by inheriting one suite
+      - the conformance kit demonstrably rejects non-conformant extensions
+      - plugin failure resolves to DENY
+    required_tests: [architecture, conformance]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+    stop_for_human: false
+
+  - id: CORE-S004
+    title: Structured explanations and full determinism on the plugin boundary
+    depends_on: [CORE-S003]
+    threats: [A5, A9]
+    scope: ["src/secondsign/contracts/**", "tests/contracts/**"]
+    forbidden: [free text on a boundary model]
+    acceptance:
+      - explanation becomes a closed structured form; no arbitrary text crosses the boundary
+      - identical inputs produce byte-identical results including reason ordering
+    required_tests: [unit, properties, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false
+
+  - id: CORE-S005
+    title: Freeze Policy Plugin API v1
+    depends_on: [CORE-S004]
+    threats: [A9]
+    scope: ["src/secondsign/contracts/**", "docs/**"]
+    forbidden: []
+    acceptance:
+      - contract version pinned and compatibility policy published
+      - ratchet tests cover every published symbol
+    required_tests: [architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: public API freeze
+
+  - id: CORE-S006
+    title: Decision dimensions and closed PaymentPayload
+    depends_on: [CORE-S005]
+    threats: [A5, A6]
+    scope: ["src/secondsign/intent/**", "tests/intent/**"]
+    forbidden: [free-form mappings, raw account identifiers, floating-point money]
+    acceptance:
+      - value is a band, not a scalar
+      - rail payloads are a closed union
+    required_tests: [unit, properties, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false
+
+  - id: CORE-S007
+    title: TransactionIntent and versioned IntentDigest
+    depends_on: [CORE-S006]
+    threats: [B1, B2]
+    scope: ["src/secondsign/intent/**", "tests/intent/**"]
+    forbidden: [free-form mappings]
+    acceptance:
+      - digest covers every material field and is deterministic, total and versioned
+      - any field change changes the digest
+    required_tests: [unit, properties, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false
+
+  - id: CORE-S008
+    title: Rail adapter contract and conformance suite, with a Stripe mapping
+    depends_on: [CORE-S007]
+    threats: [A1, A5, B9]
+    scope: ["src/secondsign/adapters/**", "src/secondsign/conformance/**", "tests/adapters/**"]
+    forbidden: [network calls in this slice, caller-supplied idempotency keys]
+    acceptance:
+      - a tool call maps to a TransactionIntent
+      - idempotency key is derived by the adapter, never accepted from the caller
+      - source trust can only be downgraded
+      - RailAdapterConformance exists and the Stripe mapping passes it
+    required_tests: [unit, conformance, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false
+
+  - id: CORE-S009
+    title: Amount and sliding-window aggregate policy
+    depends_on: [CORE-S008]
+    threats: [B4, A3, A4]
+    scope: ["src/secondsign/policy/**", "tests/policy/**"]
+    forbidden: [natural-day or natural-hour window boundaries]
+    acceptance:
+      - limits judged on a sliding-window aggregate; a single transaction is the special case
+      - missing context falls back to the strictest default, never to some other policy
+    required_tests: [unit, properties, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false
+
+  - id: CORE-S010
+    title: DecisionEngine with combination law property tests
+    depends_on: [CORE-S009]
+    threats: [A9, A7]
+    scope: ["src/secondsign/decision/**", "tests/decision/**"]
+    forbidden: []
+    acceptance:
+      - ALLOW / REVIEW / DENY, monotone by construction
+      - evaluation failure resolves to DENY
+      - every non-ALLOW carries stable reason codes
+    required_tests: [unit, properties, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false
+
+  - id: CORE-S011
+    title: Digest-bound MakerChecker and approval provider contract
+    depends_on: [CORE-S010]
+    threats: [B2, B3, B6]
+    scope: ["src/secondsign/approval/**", "tests/approval/**"]
+    forbidden: [approvals bound to an agent, session, or action type]
+    acceptance:
+      - approval binds to one digest, is one-shot, and expires
+      - a missing expiry is treated as expired
+      - maker and checker identities are distinct types
+      - ApprovalProviderConformance exists
+    required_tests: [unit, properties, conformance, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false
+
+  - id: CORE-S012
+    title: Idempotency reservation and three-state ExecutionGateway
+    depends_on: [CORE-S011]
+    threats: [B1, B2, B8, B7]
+    scope: ["src/secondsign/gateway/**", "tests/gateway/**"]
+    forbidden: [accepting caller parameters at the gateway]
+    acceptance:
+      - gateway accepts only the decision-carried intent
+      - digest re-verified immediately before dispatch
+      - idempotency reserved before execution, not recorded after
+      - outcome is success / failure / unknown; unknown is not failure
+    required_tests: [unit, properties, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false
+
+  - id: CORE-S013
+    title: Fail-closed hash-chained AuditReceipt and audit sink contract
+    depends_on: [CORE-S012]
+    threats: [A7, A1, A5]
+    scope: ["src/secondsign/audit/**", "tests/audit/**"]
+    forbidden: [raw values in receipts, silently dropped writes]
+    acceptance:
+      - every non-ALLOW path produces a receipt, including error and degraded paths
+      - audit write failure is itself fail-closed
+      - chain break is detectable
+      - AuditSinkConformance exists
+    required_tests: [unit, properties, conformance, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false
+
+  - id: CORE-S014
+    title: Stripe end-to-end demonstration
+    depends_on: [CORE-S013]
+    threats: [B1, B2, A7]
+    scope: ["src/secondsign/**", "tests/e2e/**"]
+    forbidden: [committed credentials]
+    acceptance:
+      - a test-mode transfer is held, approved, released
+      - a redacted hash-chained receipt links decision, approval and outcome
+    required_tests: [e2e]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: external credentials and first outbound call
+
+  - id: CORE-S015
+    title: Alpaca adapter — abstraction falsification
+    depends_on: [CORE-S014]
+    threats: [B5, A6]
+    scope: ["src/secondsign/adapters/**", "tests/adapters/**"]
+    forbidden: [changing the decision layer to accommodate a rail]
+    acceptance:
+      - TradePayload added without changing the decision layer
+      - market session and quote validity enforced
+    required_tests: [unit, conformance, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: external credentials; a failed falsification is a design decision
+    rationale: >
+      If the decision layer needs to change to accept a brokerage rail, the
+      intent abstraction is wrong and must be redone rather than patched. That
+      outcome is why this slice exists.
+
+  - id: CORE-S016
+    title: Red-team matrix expansion
+    depends_on: [CORE-S015]
+    threats: [A2, A3, B2, B3, B4, B6, B7]
+    scope: ["tests/redteam/**"]
+    forbidden: []
+    acceptance:
+      - control-plane and approval-replay groups written RED first
+      - approval-rate budget measured
+    required_tests: [redteam]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: false

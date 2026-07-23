@@ -42,17 +42,20 @@ class PolicyPlugin(Protocol):
     def evaluate(self, view: PolicyView) -> PluginJudgement: ...
 
 
-def _escalate(reason: ReasonCode, explanation: str) -> PluginJudgement:
+def _deny(reason: ReasonCode, explanation: str) -> PluginJudgement:
     """The response to a plugin that cannot be trusted to have answered.
 
-    REVIEW rather than DENY, deliberately. The judgement is unknown, and a
-    human is the right arbiter of unknown; escalating never permits execution,
-    so this is closed in the sense that matters. Going straight to DENY would
-    mean one crashing plugin halts all payments, and an operator under that
-    pressure disables the plugin system — which is a worse security outcome
-    than a queue of held transactions.
+    DENY, not an escalation (INV-1). A plugin that failed might have been the
+    one about to deny, and treating "we do not know" as "a human should look"
+    moves a machine-checkable guarantee into a review queue that, under load,
+    gets approved in bulk.
+
+    The availability objection is real — one crashing extension can hold every
+    transaction — and is answered by operator-visible extension health and a
+    declared degraded state, not by softening the verdict. See
+    ``docs/INVARIANTS.md``.
     """
-    return PluginJudgement(verdict=PluginVerdict.REVIEW, reasons=(reason,), explanation=explanation)
+    return PluginJudgement(verdict=PluginVerdict.DENY, reasons=(reason,), explanation=explanation)
 
 
 def _evaluate_isolated(plugin: object, view: PolicyView) -> PluginJudgement:
@@ -68,14 +71,14 @@ def _evaluate_isolated(plugin: object, view: PolicyView) -> PluginJudgement:
             declared,
             CONTRACT_VERSION,
         )
-        return _escalate(
+        return _deny(
             ReasonCode.plugin_contract_mismatch,
             "A plugin declares an unrecognised contract version and was not consulted.",
         )
 
     evaluate = getattr(plugin, "evaluate", None)
     if not callable(evaluate):
-        return _escalate(
+        return _deny(
             ReasonCode.plugin_contract_mismatch,
             "A plugin does not implement the evaluation contract.",
         )
@@ -87,18 +90,18 @@ def _evaluate_isolated(plugin: object, view: PolicyView) -> PluginJudgement:
         # deliberately not caught: it must unwind, and an unwind is fail-closed
         # by construction because nothing downstream runs without a decision.
         logger.warning("plugin %s raised during evaluation", type(plugin).__name__, exc_info=True)
-        return _escalate(
+        return _deny(
             ReasonCode.plugin_error,
-            "A plugin failed during evaluation; escalating for human review.",
+            "A plugin failed during evaluation; denying.",
         )
 
     if not isinstance(result, PluginJudgement):
-        return _escalate(
+        return _deny(
             ReasonCode.plugin_invalid_result,
             "A plugin returned a value that is not a judgement.",
         )
     if result.contract_version != CONTRACT_VERSION:
-        return _escalate(
+        return _deny(
             ReasonCode.plugin_contract_mismatch,
             "A plugin returned a judgement in an unrecognised contract version.",
         )

@@ -66,7 +66,7 @@ class NotAPluginAtAll:
 )
 def test_every_failure_mode_escalates_with_a_distinct_reason(view, plugin, expected_reason):
     result = run_plugins([plugin], view)
-    assert result.verdict is not PluginVerdict.ABSTAIN
+    assert result.verdict is PluginVerdict.DENY
     assert expected_reason in result.reasons
     assert result.explanation.strip()
 

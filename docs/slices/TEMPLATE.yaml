@@ -1,0 +1,68 @@
+# Slice manifest template.
+#
+# A slice is the unit of contribution: one branch, one review, one reviewable
+# change. Copy this file, fill it in, and open it as the first commit of your
+# branch so reviewers agree on scope before any code exists.
+#
+# `tools/validate_slice.py` checks this file mechanically. A slice that does
+# not validate is not ready to start.
+
+# Stable identifier. AREA-NNN, e.g. CORE-S018, RAIL-S003.
+id: AREA-SNNN
+
+# One line, imperative. What the codebase can do afterwards that it cannot now.
+title: Add the thing
+
+# Slice ids that must be complete first. Empty list if none.
+depends_on: []
+
+# Threat identifiers from docs/THREAT_MODEL.md that this slice addresses.
+# A slice with no threats must say why in `rationale` — most features that
+# touch the decision path exist because of a threat, and one that does not is
+# worth a second look.
+threats: [A5, B1]
+
+# Glob patterns this slice may touch. A change outside its declared scope is
+# a scope violation, not a bonus.
+scope:
+  - src/secondsign/area/**
+  - tests/area/**
+
+# Shapes this slice must not introduce. Reviewers and CI check these.
+forbidden:
+  - free-form mappings
+  - raw account identifiers
+  - floating-point money
+
+# What "done" means, in terms a test can be written against. Vague acceptance
+# criteria are the main reason a slice sprawls.
+acceptance:
+  - the object is deeply immutable
+  - unknown fields are rejected
+  - every material field changes the digest
+
+# Test categories that must be present. See docs/CONTRIBUTING for what each
+# directory is for.
+required_tests:
+  - unit
+  - properties
+  - architecture
+
+# Quality gates that must pass. These are the CI job names.
+gates:
+  - ruff_check
+  - ruff_format
+  - pytest
+  - lint_imports
+
+# True when a human must approve before this slice is marked complete.
+# Reserved for: public API freezes, any weakening of a guarantee, product
+# scope changes, external credentials or real money, release and deploy, and
+# legal or trademark questions. Ordinary implementation is not a checkpoint.
+stop_for_human: false
+
+# Required when stop_for_human is true.
+checkpoint_reason: ""
+
+# Optional free text for context a reviewer needs.
+rationale: ""

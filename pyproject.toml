@@ -11,7 +11,7 @@ keywords = ["agent-security", "fintech", "payments", "authorization"]
 dependencies = ["pydantic>=2"]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "ruff", "hypothesis", "import-linter"]
+dev = ["pytest", "pytest-cov", "ruff", "hypothesis", "import-linter", "mypy", "pyyaml"]
 
 [build-system]
 requires = ["hatchling"]
@@ -22,6 +22,7 @@ packages = ["src/secondsign"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-q"
 
 [tool.coverage.run]
 source = ["secondsign"]
@@ -36,6 +37,9 @@ extend-select = ["I", "B", "S"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+# The conformance kit ships in src/ so third parties can import it, but it is
+# test code: assertions are its output, not a debugging shortcut.
+"src/secondsign/conformance/**" = ["S101"]
 
 [tool.importlinter]
 root_package = "secondsign"
@@ -55,3 +59,11 @@ forbidden_modules = [
     "secondsign.audit",
     "secondsign.adapters",
 ]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+strict_equality = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = false
