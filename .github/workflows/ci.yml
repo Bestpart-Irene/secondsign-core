@@ -82,8 +82,8 @@ jobs:
           fi
           echo "ok"
 
-      # The content half of the dependency boundary: per-file provenance, no
-      # absolute path outside the repository, no dependency nobody declared.
+      # Per-file provenance, no absolute path outside the repository, and no
+      # dependency nobody declared.
       - name: SPDX and copyright headers
         run: true
 
