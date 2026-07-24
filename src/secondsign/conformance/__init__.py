@@ -12,18 +12,21 @@ Available today:
 - :class:`PolicyPluginConformance`
 - :class:`RailAdapterConformance`
 - :class:`ApprovalProviderConformance`
+- :class:`AuditSinkConformance`
 
-Forthcoming, tracked in ``docs/slices/roadmap.yaml``: audit sinks (``CORE-S013``)
-and compliance providers (``CORE-S012``). Those contracts do not exist yet, and
-shipping an empty suite would imply a guarantee that is not being made.
+Forthcoming, tracked in ``docs/slices/roadmap.yaml``: compliance providers.
+That contract does not exist yet, and shipping an empty suite would imply a
+guarantee that is not being made.
 """
 
 from secondsign.conformance.approval_provider import ApprovalProviderConformance
+from secondsign.conformance.audit_sink import AuditSinkConformance
 from secondsign.conformance.policy_plugin import PolicyPluginConformance, conformance_corpus
 from secondsign.conformance.rail_adapter import RailAdapterConformance
 
 __all__ = [
     "ApprovalProviderConformance",
+    "AuditSinkConformance",
     "PolicyPluginConformance",
     "RailAdapterConformance",
     "conformance_corpus",
