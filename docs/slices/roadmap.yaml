@@ -183,7 +183,7 @@ slices:
     title: Fail-closed hash-chained AuditReceipt and audit sink contract
     depends_on: [CORE-S012]
     threats: [A7, A1, A5]
-    scope: ["src/secondsign/audit/**", "tests/audit/**"]
+    scope: ["src/secondsign/audit/**", "src/secondsign/conformance/**", "tests/audit/**"]
     forbidden: [raw values in receipts, silently dropped writes]
     acceptance:
       - every non-ALLOW path produces a receipt, including error and degraded paths
