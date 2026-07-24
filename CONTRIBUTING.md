@@ -71,15 +71,8 @@ mypy src
 pytest
 lint-imports
 python tools/validate_slice.py docs/slices/roadmap.yaml
-true
-python tools/check_slice_scope.py
 ```
 
-`check_slice_scope.py` takes the slice id from your branch name, so name the
-branch `feat/<SLICE-ID>/<slug>`. It fails if the branch touched a file the
-slice's manifest did not declare. Widening scope is fine — do it in the
-manifest, in its own commit, rather than as a side effect of an
-implementation.
 
 All of these run in CI on every pull request, plus a secret scan, a DCO check,
 a build check, and a dependency licence review.
