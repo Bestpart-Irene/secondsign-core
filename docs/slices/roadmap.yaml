@@ -266,3 +266,37 @@ slices:
       is the control-plane components existing (approvals CORE-S011, gateway/
       idempotency CORE-S012, audit ledger CORE-S013); it deliberately does not
       depend on the external-rail demonstrations (CORE-S014/S015).
+
+  - id: CORE-S018
+    title: Extension health and a declared degraded state
+    depends_on: [CORE-S010]
+    threats: [A8]
+    scope:
+      - src/secondsign/health/**
+      - src/secondsign/decision/**
+      - tests/health/**
+      - tests/decision/**
+    forbidden:
+      - a degraded state that permits an action that would otherwise be denied
+      - resolving an unavailable extension to anything other than the strictest path
+      - softening any verdict to preserve availability
+    acceptance:
+      - repeated failure or timeout of an extension surfaces as an operator-visible health signal, distinct from the per-decision DENY it already produces
+      - the system can enter a declared degraded state that is observable, and entering it never lowers any verdict — a degraded extension's failures still resolve to DENY, so INV-1 is preserved unchanged
+      - property test:  for every view, the decision under a degraded state is never weaker than the decision under a healthy state
+      - degraded state changes observability and operator signalling, never the decision
+    required_tests: [unit, properties, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: >
+      Sits adjacent to the availability / fail-closed tradeoff (INV-1). A human
+      must confirm the degraded state introduces no bypass and softens no
+      verdict — the whole point is to answer the availability objection without
+      weakening the guarantee.
+    rationale: >
+      INV-1's discussion names "operator-visible extension health and a declared
+      degraded state" as the correct answer to the availability objection, but no
+      slice built it — the same gap CORE-S017 had. As the plugin ecosystem grows,
+      the aggregate availability of a fail-closed chain falls with the number of
+      extensions, so this becomes thesis-critical for bank-scale adoption rather
+      than a convenience. See Decisions/0004 in secondsign-memory.
