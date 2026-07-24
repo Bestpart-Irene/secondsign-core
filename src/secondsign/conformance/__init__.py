@@ -10,14 +10,15 @@ security principles in review each time a rail or a rule is added.
 Available today:
 
 - :class:`PolicyPluginConformance`
+- :class:`RailAdapterConformance`
 
-Forthcoming, tracked in ``docs/slices/roadmap.yaml``: rail adapters
-(``CORE-S008``), approval providers (``CORE-S011``), audit sinks
-(``CORE-S013``), compliance providers (``CORE-S012``). Those contracts do not
-exist yet, and shipping an empty suite would imply a guarantee that is not
-being made.
+Forthcoming, tracked in ``docs/slices/roadmap.yaml``: approval providers
+(``CORE-S011``), audit sinks (``CORE-S013``), compliance providers
+(``CORE-S012``). Those contracts do not exist yet, and shipping an empty suite
+would imply a guarantee that is not being made.
 """
 
 from secondsign.conformance.policy_plugin import PolicyPluginConformance, conformance_corpus
+from secondsign.conformance.rail_adapter import RailAdapterConformance
 
-__all__ = ["PolicyPluginConformance", "conformance_corpus"]
+__all__ = ["PolicyPluginConformance", "RailAdapterConformance", "conformance_corpus"]
