@@ -12,6 +12,7 @@ from secondsign.intent import (
     PaymentPayload,
     PaymentTargetKind,
     SettlementPriority,
+    TransactionIntent,
 )
 
 #: A well-formed keyed fingerprint. A reference field accepts nothing else, so a
@@ -52,6 +53,17 @@ def make_payment(**overrides) -> PaymentPayload:
     return PaymentPayload(**base)
 
 
+def make_intent(**overrides) -> TransactionIntent:
+    """A valid TransactionIntent; override single fields per test."""
+    base = {
+        "dimensions": make_dimensions(),
+        "payload": make_payment(),
+        "idempotency_key": "idem-0000000000000000",
+    }
+    base.update(overrides)
+    return TransactionIntent(**base)
+
+
 @pytest.fixture
 def dimensions() -> DecisionDimensions:
     return make_dimensions()
@@ -60,3 +72,8 @@ def dimensions() -> DecisionDimensions:
 @pytest.fixture
 def payment() -> PaymentPayload:
     return make_payment()
+
+
+@pytest.fixture
+def intent() -> TransactionIntent:
+    return make_intent()
