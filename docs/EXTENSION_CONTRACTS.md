@@ -101,10 +101,10 @@ being down.
 | Extension point | Suite | Status |
 |---|---|---|
 | Policy plugin | `PolicyPluginConformance` | Available |
-| Rail adapter | `RailAdapterConformance` | Slice `CORE-S008` |
-| Approval provider | `ApprovalProviderConformance` | Slice `CORE-S011` |
-| Compliance provider | `ComplianceProviderConformance` | Slice `CORE-S012` |
-| Audit sink | `AuditSinkConformance` | Slice `CORE-S013` |
+| Rail adapter | `RailAdapterConformance` | Available |
+| Approval provider | `ApprovalProviderConformance` | Available |
+| Audit sink | `AuditSinkConformance` | Available |
+| Compliance provider | `ComplianceProviderConformance` | Forthcoming |
 
 Forthcoming suites are not stubbed. Shipping an empty conformance class would
 imply a guarantee that is not being made.

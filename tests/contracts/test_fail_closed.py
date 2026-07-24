@@ -71,9 +71,7 @@ class ReturnsMismatchedJudgementVersion:
     contract_version = CONTRACT_VERSION
 
     def evaluate(self, view):
-        return PluginJudgement(
-            contract_version=CONTRACT_VERSION + 1, verdict=PluginVerdict.ABSTAIN
-        )
+        return PluginJudgement(contract_version=CONTRACT_VERSION + 1, verdict=PluginVerdict.ABSTAIN)
 
 
 @pytest.mark.parametrize(
