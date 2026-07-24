@@ -67,6 +67,8 @@ class RejectCode(StrEnum):
     unsupported_currency = "unsupported_currency"
     malformed_call = "malformed_call"
     outside_supported_limits = "outside_supported_limits"
+    market_closed = "market_closed"
+    stale_quote = "stale_quote"
 
 
 class RejectReason(BaseModel):

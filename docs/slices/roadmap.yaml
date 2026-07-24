@@ -212,7 +212,7 @@ slices:
     title: Alpaca adapter — abstraction falsification
     depends_on: [CORE-S014]
     threats: [B5, A6]
-    scope: ["src/secondsign/adapters/**", "tests/adapters/**"]
+    scope: ["src/secondsign/adapters/**", "src/secondsign/intent/**", "tests/adapters/**", "tests/intent/**"]
     forbidden: [changing the decision layer to accommodate a rail]
     acceptance:
       - TradePayload added without changing the decision layer

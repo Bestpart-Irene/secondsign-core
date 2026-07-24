@@ -7,6 +7,7 @@ payments). A rail is a new call type and a new adapter; the decision layer does
 not change to accept it (INV-8).
 """
 
+from secondsign.adapters.alpaca import AlpacaAdapter, AlpacaCall
 from secondsign.adapters.contract import (
     RailAdapter,
     RejectCode,
@@ -17,6 +18,8 @@ from secondsign.adapters.contract import (
 from secondsign.adapters.stripe import StripeAdapter, StripeCall
 
 __all__ = [
+    "AlpacaAdapter",
+    "AlpacaCall",
     "RailAdapter",
     "RejectCode",
     "RejectReason",
