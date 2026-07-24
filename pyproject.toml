@@ -11,7 +11,15 @@ keywords = ["agent-security", "fintech", "payments", "authorization"]
 dependencies = ["pydantic>=2"]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "ruff", "hypothesis", "import-linter", "mypy", "pyyaml"]
+dev = [
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.15.22",
+    "hypothesis==6.161.0",
+    "import-linter==2.13",
+    "mypy==2.3.0",
+    "pyyaml==6.0.3",
+]
 
 [build-system]
 requires = ["hatchling"]
