@@ -57,6 +57,23 @@ class NotAPluginAtAll:
     pass
 
 
+class EvaluateNotCallable:
+    """Declares the right version, but its ``evaluate`` is not a method at all."""
+
+    contract_version = CONTRACT_VERSION
+    evaluate = "not a function"
+
+
+class ReturnsMismatchedJudgementVersion:
+    """The class version is right, so it is consulted — but the judgement it
+    returns is stamped with another version, so its answer is still discarded."""
+
+    contract_version = CONTRACT_VERSION
+
+    def evaluate(self, view):
+        return PluginJudgement(contract_version=CONTRACT_VERSION + 1, verdict=PluginVerdict.ABSTAIN)
+
+
 @pytest.mark.parametrize(
     ("plugin", "expected_reason"),
     [
@@ -66,6 +83,8 @@ class NotAPluginAtAll:
         (FromTheFuture(), ReasonCode.plugin_contract_mismatch),
         (NoVersion(), ReasonCode.plugin_contract_mismatch),
         (NotAPluginAtAll(), ReasonCode.plugin_contract_mismatch),
+        (EvaluateNotCallable(), ReasonCode.plugin_contract_mismatch),
+        (ReturnsMismatchedJudgementVersion(), ReasonCode.plugin_contract_mismatch),
     ],
 )
 def test_every_failure_mode_escalates_with_a_distinct_reason(view, plugin, expected_reason):

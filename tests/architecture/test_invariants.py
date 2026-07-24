@@ -97,16 +97,41 @@ def test_inv4_models_are_frozen(model):
     assert model.model_config.get("frozen") is True, f"{model.__qualname__} is mutable"
 
 
+def _names_a_mutable_collection(annotation_repr: str) -> bool:
+    """True if an annotation is an appendable builtin collection.
+
+    ``frozenset`` is immutable and must not be flagged, even though its repr
+    contains the substring ``set[`` — that substring match was a false positive
+    that would have rejected a legitimately-immutable frozenset field.
+    """
+    normalized = annotation_repr.replace("frozenset[", "").replace("FrozenSet[", "")
+    return "list[" in normalized or "set[" in normalized or "Set[" in normalized
+
+
+@pytest.mark.parametrize(
+    ("annotation_repr", "is_mutable"),
+    [
+        ("list[int]", True),
+        ("set[str]", True),
+        ("typing.Set[int]", True),
+        ("frozenset[int]", False),
+        ("FrozenSet[int]", False),
+        ("tuple[int, ...]", False),
+        ("int | None", False),
+    ],
+)
+def test_mutable_collection_detector(annotation_repr, is_mutable):
+    """The detector accepts frozenset and rejects the mutable builtins."""
+    assert _names_a_mutable_collection(annotation_repr) is is_mutable
+
+
 @pytest.mark.parametrize("model", MODELS, ids=lambda m: m.__qualname__)
 def test_inv4_collections_are_immutable(model):
-    """INV-4 — frozen is shallow; a list field is still appendable."""
+    """INV-4 — frozen is shallow; a list or set field is still mutable."""
     for field_name, field in model.model_fields.items():
-        annotation = repr(field.annotation)
-        assert "list[" not in annotation, (
-            f"{model.__qualname__}.{field_name} is a list — frozen=True does not protect it"
-        )
-        assert "set[" not in annotation and "Set[" not in annotation, (
-            f"{model.__qualname__}.{field_name} is a mutable set"
+        assert not _names_a_mutable_collection(repr(field.annotation)), (
+            f"{model.__qualname__}.{field_name} is a mutable collection — "
+            "frozen=True does not protect it"
         )
 
 
