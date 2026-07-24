@@ -219,8 +219,13 @@ repository. Nothing here depends on a private one.
 
 ## Provenance
 
-SecondSign Core is authored from scratch. Its history begins at its own initial
-commit, and it contains no source copied or adapted from a third party.
+SecondSign Core is an independent implementation. Its history begins at its own
+initial commit and shares no Git history with any other project.
+
+Where another project's work informed this one, it is named in
+[`NOTICE`](NOTICE) with its licence rather than left implicit — including the
+architectural patterns adopted from Doberman-Core (Apache-2.0), and the handful
+of explanatory comments adapted from it.
 
 Specifications are committed before the implementations they describe, so the
 commit order is itself part of the record. Every commit carries a DCO sign-off,

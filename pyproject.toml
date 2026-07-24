@@ -4,7 +4,7 @@ dynamic = ["version"]                       # read from src/secondsign/__init__.
 description = "Runtime authorization for financial AI agents — the gate between an agent and real money"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 authors = [{ name = "SecondSign contributors" }]
 keywords = [
@@ -75,6 +75,7 @@ include = [
     "tools",
     "README.md",
     "LICENSE",
+    "NOTICE",
     "CONTRIBUTING.md",
     "GOVERNANCE.md",
     "pyproject.toml",
