@@ -153,7 +153,7 @@ slices:
     title: Digest-bound MakerChecker and approval provider contract
     depends_on: [CORE-S010]
     threats: [B2, B3, B6]
-    scope: ["src/secondsign/approval/**", "tests/approval/**"]
+    scope: ["src/secondsign/approval/**", "src/secondsign/conformance/**", "tests/approval/**"]
     forbidden: [approvals bound to an agent, session, or action type]
     acceptance:
       - approval binds to one digest, is one-shot, and expires
