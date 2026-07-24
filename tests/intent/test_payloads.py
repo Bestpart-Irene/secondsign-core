@@ -11,7 +11,7 @@ Today the union has one member; the closure is what this slice establishes.
 import pytest
 from pydantic import ValidationError
 
-from secondsign.intent import RAIL_PAYLOAD_TYPES, PaymentPayload
+from secondsign.intent import RAIL_PAYLOAD_TYPES, PaymentPayload, TradePayload
 from tests.intent.conftest import make_payment
 
 
@@ -44,5 +44,7 @@ def test_the_union_is_closed_and_each_member_is_a_closed_model():
     assert len(discriminators) == len(RAIL_PAYLOAD_TYPES)
 
 
-def test_payment_is_the_only_current_variant():
-    assert RAIL_PAYLOAD_TYPES == (PaymentPayload,)
+def test_the_union_holds_exactly_the_known_variants():
+    """Payment (S006) and trade (S015). A new rail adds a variant here, and the
+    decision layer is unchanged when it does (INV-8)."""
+    assert RAIL_PAYLOAD_TYPES == (PaymentPayload, TradePayload)

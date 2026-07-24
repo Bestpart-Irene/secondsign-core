@@ -11,10 +11,13 @@ from secondsign.intent.digest import DIGEST_VERSION, IntentDigest, compute_diges
 from secondsign.intent.dimensions import DecisionDimensions
 from secondsign.intent.payloads import (
     RAIL_PAYLOAD_TYPES,
+    OrderType,
     PaymentPayload,
     PaymentTargetKind,
     RailPayload,
     SettlementPriority,
+    TradePayload,
+    TradeSide,
 )
 from secondsign.intent.transaction import TransactionIntent
 
@@ -23,10 +26,13 @@ __all__ = [
     "RAIL_PAYLOAD_TYPES",
     "DecisionDimensions",
     "IntentDigest",
+    "OrderType",
     "PaymentPayload",
     "PaymentTargetKind",
     "RailPayload",
     "SettlementPriority",
+    "TradePayload",
+    "TradeSide",
     "TransactionIntent",
     "compute_digest",
 ]
