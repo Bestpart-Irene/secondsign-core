@@ -198,7 +198,7 @@ slices:
     title: Stripe end-to-end demonstration
     depends_on: [CORE-S013]
     threats: [B1, B2, A7]
-    scope: ["src/secondsign/**", "tests/e2e/**"]
+    scope: ["src/secondsign/**", "tests/e2e/**", "pyproject.toml"]
     forbidden: [committed credentials]
     acceptance:
       - a test-mode transfer is held, approved, released
