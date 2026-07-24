@@ -11,6 +11,9 @@ keywords = ["agent-security", "fintech", "payments", "authorization"]
 dependencies = ["pydantic>=2"]
 
 [project.optional-dependencies]
+# The Stripe rail is opt-in: the deterministic core needs no payment SDK, so
+# only a deployment that wires the Stripe executor installs it.
+stripe = ["stripe>=15,<16"]
 dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
@@ -19,6 +22,7 @@ dev = [
     "import-linter==2.13",
     "mypy==2.3.0",
     "pyyaml==6.0.3",
+    "stripe==15.3.1",
 ]
 
 [build-system]
