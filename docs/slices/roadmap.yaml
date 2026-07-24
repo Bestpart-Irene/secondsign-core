@@ -238,3 +238,31 @@ slices:
     required_tests: [redteam]
     gates: [ruff_check, ruff_format, pytest, lint_imports]
     stop_for_human: false
+
+  - id: CORE-S017
+    title: Structural control-plane isolation from the managed agent
+    depends_on: [CORE-S013]
+    threats: [A2, A3]
+    scope: ["src/secondsign/**", "tests/architecture/**"]
+    forbidden:
+      - the managed-agent surface importing any control-plane module
+      - an isolation decision that reads a configurable setting
+    acceptance:
+      - limits, approver roster, idempotency store, audit ledger and fingerprint keys are unreachable from the managed-agent surface by import structure, enforced by lint-imports and an architecture test that discovers modules rather than naming them
+      - the isolation judgement depends on no configurable policy — there is no setting whose value can make a control-plane module reachable
+      - reading any setting looser than the strictest default requires a matching, unexpired, approved ledger record; absent that, resolution falls back to strictest (a missing expiry counts as expired)
+      - INV-12's enforcement column names this slice's tests, replacing the CORE-S017 placeholder
+    required_tests: [architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: >
+      Marquee isolation invariant (INV-12). A human must confirm the guarantee
+      is structural and depends on no configurable policy before it is marked
+      complete — a control that a setting can switch off is not this control.
+    rationale: >
+      INV-12 already names CORE-S017 as its enforcer, but the slice was never
+      queued: the roadmap stopped at CORE-S016, leaving the control-plane-
+      unreachability invariant with no slice to build it. Structural precondition
+      is the control-plane components existing (approvals CORE-S011, gateway/
+      idempotency CORE-S012, audit ledger CORE-S013); it deliberately does not
+      depend on the external-rail demonstrations (CORE-S014/S015).
