@@ -28,6 +28,7 @@ Threat references point at [`THREAT_MODEL.md`](THREAT_MODEL.md).
 | INV-12 | **The control plane is unreachable.** Limits, approver roster, idempotency store, audit ledger and fingerprint keys are structurally out of reach of the managed agent, and that judgement depends on no configurable policy. | A2, A3 | slice `CORE-S017` |
 | INV-13 | **Determinism.** Identical inputs produce byte-identical results, including finding order. Extension registration order does not affect the record, not merely the verdict. | A9 | `tests/contracts/test_structured_findings.py`, `tests/contracts/test_combine_laws.py` |
 | INV-14 | **Source trust only ever decreases.** No path upgrades an instruction's provenance. Mixed provenance is treated as its least trusted component. | B9 | slice `CORE-S008` |
+| INV-15 | **The published contract surface is frozen.** Once `CONTRACT_VERSION` is fixed, no published symbol, enum member, or model field is added, removed, or renamed without changing the version. A plugin certified against a version keeps working, or is refused for declaring a version core no longer serves — it never silently faces a surface that shifted underneath it. | A9 | `tests/architecture/test_contract_surface_ratchet.py` |
 
 ## Why fail-closed means DENY
 

@@ -117,5 +117,38 @@ consulted at all — even a well-formed `DENY` from it is discarded, because a
 plugin speaking a different dialect may mean something different by it.
 
 Once a contract is frozen (slice `CORE-S005` for policy plugins), the
-compatibility policy in this repository governs what may change within a
-version.
+compatibility policy below governs what may change within a version.
+
+## Compatibility policy
+
+Policy Plugin API **v1** (`CONTRACT_VERSION = 1`) is frozen. Its surface — every
+symbol exported from `secondsign.contracts`, every member of every published
+enum, and every field of `PolicyView`, `Finding`, and `PluginJudgement` — is
+held by [`tests/architecture/test_contract_surface_ratchet.py`](../tests/architecture/test_contract_surface_ratchet.py).
+That test is the policy, not a description of it: a change to the surface cannot
+merge without changing the test in the same pull request, which makes the change
+deliberate and reviewable rather than incidental.
+
+Within a frozen version:
+
+- **Nothing structural changes.** No published symbol, enum member, or model
+  field is added, removed, renamed, or retyped. Adding even a new enum member is
+  a version change, because a plugin certified against v1 has never seen it and a
+  v1 record that now contains it is no longer what v1 promised.
+- **Behaviour is not quietly re-specified.** A field keeps its meaning, its
+  bounds, and its ordering. Widening what a field accepts is a surface change in
+  everything but name.
+- **Documentation and internal implementation may change freely**, as long as
+  the ratchet and the conformance suite stay green — those are what an extension
+  author actually depends on.
+
+Changing the surface means **incrementing `CONTRACT_VERSION`**. A plugin
+declaring the old version is then refused rather than consulted (INV-1): a
+version it no longer serves is treated as an unknown dialect, which denies,
+rather than being run against a surface that shifted underneath it. A removed or
+changed symbol is carried through at least one version as a deprecation before
+the version that drops it, so an author has a release in which both the old and
+the new surface are described.
+
+This policy is itself part of the frozen contract: it changes only through an
+ADR, per [`INVARIANTS.md`](INVARIANTS.md) (INV-15).
