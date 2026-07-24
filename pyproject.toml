@@ -1,14 +1,43 @@
 [project]
 name = "secondsign-core"
-version = "0.0.1"
-description = "Runtime authorization for financial AI agents"
+dynamic = ["version"]                       # read from src/secondsign/__init__.py
+description = "Runtime authorization for financial AI agents — the gate between an agent and real money"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 authors = [{ name = "SecondSign contributors" }]
-keywords = ["agent-security", "fintech", "payments", "authorization"]
+keywords = [
+    "ai-agents",
+    "agent-security",
+    "authorization",
+    "fintech",
+    "payments",
+    "guardrails",
+    "human-in-the-loop",
+    "audit",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Security",
+    "Typing :: Typed",
+]
 dependencies = ["pydantic>=2"]
+
+[project.urls]
+Homepage = "https://secondsignruntime.com"
+Repository = "https://github.com/Bestpart-Irene/secondsign-core"
+Issues = "https://github.com/Bestpart-Irene/secondsign-core/issues"
+Architecture = "https://github.com/Bestpart-Irene/secondsign-core/blob/main/docs/ARCHITECTURE.md"
+"Threat model" = "https://github.com/Bestpart-Irene/secondsign-core/blob/main/docs/THREAT_MODEL.md"
 
 [project.optional-dependencies]
 # The Stripe rail is opt-in: the deterministic core needs no payment SDK, so
@@ -29,8 +58,28 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "src/secondsign/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/secondsign"]
+
+# What a source distribution carries: the package, its tests, the documents that
+# make the guarantees checkable, and nothing else. An sdist that ships only code
+# asks the reader to take the security properties on trust.
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/secondsign",
+    "tests",
+    "docs",
+    "tools",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "CONTRIBUTING.md",
+    "GOVERNANCE.md",
+    "pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

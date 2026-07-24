@@ -1,0 +1,103 @@
+name: Release
+
+# A release is a tag, and nothing else. Pushing `v0.1.0` builds the artefacts
+# from that exact commit and publishes them; there is no local `twine upload`
+# step anyone can run differently, and no API token stored anywhere. PyPI
+# authenticates the workflow itself through OIDC (trusted publishing), so a
+# leaked repository secret cannot be used to publish a release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to publish"
+        required: true
+        default: testpypi
+        type: choice
+        options: [testpypi, pypi]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify the distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: python -m pip install --upgrade pip build twine
+
+      # The tag is a claim about the version. If it disagrees with the package,
+      # the disagreement must stop the release, not survive it on PyPI forever —
+      # a version can never be re-uploaded once taken.
+      - name: The tag matches the packaged version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          packaged="$(python -c 'import re,pathlib; print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("src/secondsign/__init__.py").read_text()).group(1))')"
+          echo "tag=$tag packaged=$packaged"
+          test "$tag" = "$packaged"
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Check distribution metadata
+        run: twine check --strict dist/*
+
+      # The wheel is what users get. Install it in a clean environment and
+      # confirm the public path imports with no development extras present.
+      - name: The wheel installs and imports on its own
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet dist/*.whl
+          /tmp/verify/bin/python - <<'PY'
+          import secondsign
+          from secondsign.contracts import PluginJudgement, PolicyView  # noqa: F401
+          from secondsign.decision import DecisionEngine  # noqa: F401
+          from secondsign.gateway import ExecutionGateway  # noqa: F401
+          print("ok", secondsign.__version__)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution
+          path: dist/
+
+  testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write # OIDC, in place of an API token
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: distribution, path: dist/ }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    name: Publish to PyPI
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+    runs-on: ubuntu-latest
+    # A GitHub environment with a required reviewer is the last human checkpoint
+    # before an irreversible upload. Configure it in Settings → Environments.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/secondsign-core
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: distribution, path: dist/ }
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,53 @@
+name: Bug report
+description: Something behaves against a documented invariant or contract.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **If this is a security issue** — a way to reach
+        ALLOW that should be impossible, a fail-open path, or raw data reaching a
+        record — do **not** file it here. Use the private
+        [Report a vulnerability](https://github.com/Bestpart-Irene/secondsign-core/security/advisories/new)
+        form instead. See [`SECURITY.md`](../blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did the code do, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: >
+        The smallest case that shows it. Never include real financial or
+        customer data, credentials, or account identifiers — a redacted case is
+        enough.
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: invariant
+    attributes:
+      label: Invariant or contract affected
+      description: >
+        If you can, name the row from docs/INVARIANTS.md or the contract in
+        docs/EXTENSION_CONTRACTS.md that this contradicts.
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Release tag or commit SHA you observed this on.
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.11 / 3.12 / 3.13"
+    validations:
+      required: false
