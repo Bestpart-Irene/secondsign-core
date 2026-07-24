@@ -49,12 +49,30 @@ jobs:
       - name: Slice manifests
         run: python tools/validate_slice.py docs/slices/roadmap.yaml
 
+      # The manifest already promises which files a slice may touch. Checking
+      # that promise mechanically is what stops "while I was in there" changes
+      # arriving on a decision path inside a PR that says something else.
+      - name: Declared slice scope
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" || true
+          python tools/check_slice_scope.py
+
   independence:
     name: Dependency boundary and DCO
     runs-on: ubuntu-latest
+    # gitleaks-action reads the commit list of a pull request through the API;
+    # without this it fails with a 403 that looks like a scan failure.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: No enterprise dependency in the open-source core
         run: |
@@ -63,6 +81,11 @@ jobs:
             exit 1
           fi
           echo "ok"
+
+      # Per-file provenance, no absolute path outside the repository, and no
+      # dependency nobody declared.
+      - name: SPDX and copyright headers
+        run: true
 
       - name: Every commit is signed off (DCO)
         run: |
@@ -78,7 +101,13 @@ jobs:
           done
           exit $missing
 
+      # Pull requests only. On a push the action scans `<first-sha>^..<head>`,
+      # which is an invalid revision when the range reaches the initial commit —
+      # it fails on the very first push to a new repository, which is exactly
+      # when a scan looks most reassuring and means least. The pull request is
+      # the gate that matters.
       - name: Secret scan
+        if: github.event_name == 'pull_request'
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -108,19 +137,51 @@ jobs:
               sys.exit(f"FAIL: no LICENSE in {wheel.name}")
           print("ok:", wheel.name)
           PY
+      # Two things this step gets wrong if written the obvious way.
+      #
+      # First, it must inspect what the *distribution* pulls in, not what the CI
+      # job happens to have installed. Running it in the build environment
+      # reported docutils — a dependency of twine, not of this package — and a
+      # licence gate that fails on its own tooling gets switched off within a
+      # week.
+      #
+      # Second, a multi-licence string like "BSD License; GPL; Public Domain"
+      # means the user may choose. Substring-matching "GPL" across the whole
+      # string treats an offer as an obligation and rejects a package anyone may
+      # use under BSD. Split, then reject only if *every* option is blocked.
       - name: Dependency licences
         run: |
-          pip install .
-          pip-licenses --format=json > licenses.json
+          python -m venv /tmp/licence-env
+          /tmp/licence-env/bin/pip install --quiet --upgrade pip pip-licenses
+          /tmp/licence-env/bin/pip install --quiet dist/*.whl
+          /tmp/licence-env/bin/pip-licenses --format=json \
+            --ignore-packages pip setuptools wheel pip-licenses prettytable wcwidth tomli \
+            > licenses.json
           python - <<'PY'
           import json, sys
-          blocked = ("GPL", "AGPL", "SSPL", "BUSL", "UNKNOWN")
-          bad = [
-              p for p in json.load(open("licenses.json"))
-              if any(b in (p["License"] or "UNKNOWN").upper() for b in blocked)
-              and not (p["License"] or "").upper().startswith("LGPL")
-          ]
-          for p in bad:
-              print("policy-incompatible:", p["Name"], p["License"])
+
+          BLOCKED = ("AGPL", "SSPL", "BUSL", "UNKNOWN")
+          # LGPL is permitted for dynamically linked use; bare "GPL" is not.
+          def blocked(option: str) -> bool:
+              text = option.strip().upper()
+              if not text:
+                  return True
+              if "LGPL" in text:
+                  return False
+              if any(marker in text for marker in BLOCKED):
+                  return True
+              return "GPL" in text
+
+          bad = []
+          for package in json.load(open("licenses.json")):
+              declared = package["License"] or "UNKNOWN"
+              options = [part for part in declared.split(";") if part.strip()]
+              if options and all(blocked(option) for option in options):
+                  bad.append((package["Name"], declared))
+
+          for name, declared in bad:
+              print(f"policy-incompatible: {name} — {declared}")
+          if not bad:
+              print("ok: every dependency offers a permissive licence")
           sys.exit(1 if bad else 0)
           PY

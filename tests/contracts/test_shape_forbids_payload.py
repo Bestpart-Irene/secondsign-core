@@ -1,3 +1,5 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
 """Threat A5 — the contract must have nowhere to hide a payload.
 
 These are the tests that define "done" for this slice: an enterprise plugin

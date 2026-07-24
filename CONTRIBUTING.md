@@ -71,6 +71,7 @@ mypy src
 pytest
 lint-imports
 python tools/validate_slice.py docs/slices/roadmap.yaml
+python tools/check_slice_scope.py
 ```
 
 

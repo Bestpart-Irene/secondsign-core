@@ -1,3 +1,5 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
 """A misbehaving plugin fails upward, never open.
 
 Three failure modes are distinguished so an operator can tell a crash from a

@@ -1,3 +1,5 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
 """The conformance kit must certify good extensions and reject bad ones.
 
 A suite that passes everything certifies nothing, so half this file is

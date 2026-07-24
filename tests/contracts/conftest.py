@@ -1,3 +1,5 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
 """Shared fixtures for the plugin-contract tests."""
 
 from datetime import datetime, timedelta, timezone

@@ -1,3 +1,5 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
 """Algebraic laws for combination.
 
 Combination is the single place a plugin could weaken protection, so it is

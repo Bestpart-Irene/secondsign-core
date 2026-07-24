@@ -1,3 +1,5 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
 """Architecture invariants, enforced against the whole package.
 
 These tests discover every model in `secondsign` rather than naming a fixed
@@ -153,7 +155,14 @@ def test_inv7_core_does_not_import_enterprise():
 
 
 def test_no_module_reaches_outside_the_repository():
-    """No module may hard-code a path outside this repository."""
+    """No module may hard-code a path outside this repository.
+
+    A package that names a directory on someone's machine is a package that
+    does not build anywhere else, and a decision path that can read a file
+    outside its own tree is one more place for configuration to arrive from.
+    Both failures start as an absolute home-directory path in a source file.
+    """
+    outside = ("/users/", "/home/", "~/", "c:\\users")
     for module_info in pkgutil.walk_packages(secondsign.__path__, f"{secondsign.__name__}."):
         module = importlib.import_module(module_info.name)
         source = getattr(module, "__file__", None)
@@ -161,4 +170,5 @@ def test_no_module_reaches_outside_the_repository():
             continue
         with open(source, encoding="utf-8") as handle:
             text = handle.read().lower()
-        assert "/users/" not in text, f"{module_info.name} hard-codes an external path"
+        for marker in outside:
+            assert marker not in text, f"{module_info.name} hard-codes an external path: {marker}"

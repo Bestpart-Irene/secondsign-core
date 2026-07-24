@@ -1,3 +1,5 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
 """CORE-S004 — no free text crosses the boundary, and results are canonical.
 
 Threat A5: a bounded, screened text field was still a text field. A plugin

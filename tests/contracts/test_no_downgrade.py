@@ -1,3 +1,5 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
 """A plugin may tighten. It has no vocabulary for anything else.
 
 The guarantee is structural, not procedural: there is no ALLOW member for a
