@@ -71,7 +71,7 @@ slices:
     title: Freeze Policy Plugin API v1
     depends_on: [CORE-S004]
     threats: [A9]
-    scope: ["src/secondsign/contracts/**", "docs/**"]
+    scope: ["src/secondsign/contracts/**", "docs/**", "tests/architecture/**"]
     forbidden: []
     acceptance:
       - contract version pinned and compatibility policy published
