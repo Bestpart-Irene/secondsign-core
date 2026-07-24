@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/Bestpart-Irene/secondsign-core/security/advisories/new
+    about: >
+      A fail-open path, a way to reach ALLOW that should be impossible, or raw
+      data reaching a record. Never file these as public issues.
+  - name: Question or support
+    url: https://github.com/Bestpart-Irene/secondsign-core/discussions
+    about: >
+      How to build on or contribute to core. See SUPPORT.md for where to start.

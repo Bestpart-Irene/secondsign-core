@@ -1,0 +1,46 @@
+name: Feature or slice proposal
+description: Propose a change to core, or a new slice for the roadmap.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most additions belong in an **extension**, not in core — adding a rail,
+        policy source, approval channel, or audit destination should not require
+        changing core. See [`docs/EXTENSION_CONTRACTS.md`](../blob/main/docs/EXTENSION_CONTRACTS.md)
+        before proposing a core change.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What can the codebase not do today that it should?
+    validations:
+      required: true
+  - type: input
+    id: threat
+    attributes:
+      label: Threat it addresses
+      description: >
+        A change on the decision path should trace to a threat in
+        docs/THREAT_MODEL.md. Which one? If none, say why it still belongs.
+    validations:
+      required: false
+  - type: dropdown
+    id: placement
+    attributes:
+      label: Where does this belong?
+      options:
+        - Core (on the decision path)
+        - An extension (rail / policy / approval / audit)
+        - Not sure — need guidance
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: What "done" would look like
+      description: >
+        In terms a test could be written against — vague acceptance is the main
+        reason a slice sprawls. See docs/slices/TEMPLATE.yaml.
+    validations:
+      required: false

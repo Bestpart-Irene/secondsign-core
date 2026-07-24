@@ -212,6 +212,9 @@ production custody of money.
 | [Extension contracts](docs/EXTENSION_CONTRACTS.md) | How to add a rail, rule or provider and certify it |
 | [Contributing](CONTRIBUTING.md) | The slice protocol and quality gates |
 | [Governance](GOVERNANCE.md) | Who decides what, and how little needs deciding |
+| [Security](SECURITY.md) | How to report a vulnerability, privately |
+| [Support](SUPPORT.md) | Where to start reading, building, and asking |
+| [Releasing](docs/RELEASING.md) | How a version reaches PyPI |
 | [Roadmap](docs/slices/roadmap.yaml) | The build queue, machine-validated |
 
 Everything needed to build on or contribute to this project is in this
