@@ -238,3 +238,25 @@ slices:
     required_tests: [redteam]
     gates: [ruff_check, ruff_format, pytest, lint_imports]
     stop_for_human: false
+
+  - id: CORE-S017
+    title: Standalone gateway process and a structurally unreachable control plane
+    depends_on: [CORE-S016]
+    threats: [A2, A3]
+    scope: ["src/secondsign/**", "tests/redteam/**", "tests/architecture/**", "docs/**", "pyproject.toml"]
+    forbidden: [a control-plane field on any agent- or plugin-facing model]
+    acceptance:
+      - the gateway runs as its own process, reachable only through the request it authorizes
+      - limits, approver roster, idempotency store, audit ledger and fingerprint keys sit behind that boundary, out of the managed agent's reach
+      - the isolation depends on no configurable policy
+    required_tests: [redteam, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: the deployment boundary that makes no-bypass real is an architectural commitment
+    rationale: >
+      INV-12 and the control-plane red-team group already commit to this
+      boundary. Today the library enforces the part expressible in the type
+      shapes — no control-plane field on any agent- or plugin-facing model — and
+      names this slice for the deployment topology that remains. It is queued
+      here so the invariant's enforcing slice resolves to a real manifest rather
+      than a dangling id.
