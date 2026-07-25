@@ -14,9 +14,8 @@ Available today:
 - :class:`ApprovalProviderConformance`
 - :class:`AuditSinkConformance`
 
-Forthcoming, tracked in ``docs/slices/roadmap.yaml``: compliance providers.
-That contract does not exist yet, and shipping an empty suite would imply a
-guarantee that is not being made.
+Forthcoming: compliance providers. That contract does not exist yet, and
+shipping an empty suite would imply a guarantee that is not being made.
 """
 
 from secondsign.conformance.approval_provider import ApprovalProviderConformance
