@@ -88,9 +88,16 @@ around — that is what slice `CORE-S015` exists to falsify.
 
 ## Status
 
-Early. The plugin contract, its conformance kit, and the architectural
-enforcement are implemented. Intent, policy, decision, approval, gateway and
-audit are specified but not yet built; see
-[`slices/roadmap.yaml`](slices/roadmap.yaml) for the order and
+Pre-1.0; interfaces may still change. The whole decision path is built and
+tested: the plugin contract and its conformance kit, intent, policy, the
+decision engine, maker-checker approval, the execution gateway, the
+hash-chained audit receipt, and the Stripe and Alpaca adapters. See
 [`INVARIANTS.md`](INVARIANTS.md) for which guarantees are live tests today
-versus commitments with a named slice.
+versus commitments with a named slice, and
+[`slices/roadmap.yaml`](slices/roadmap.yaml) for the build queue.
+
+What remains is the deployment shape that makes no-bypass real: a standalone
+gateway process with a control-plane store the agent cannot reach (INV-12,
+slice [`CORE-S017`](slices/roadmap.yaml)). Running the library inside the
+agent's process is right for development and testing, not yet for production
+custody of money.
