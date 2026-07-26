@@ -299,4 +299,42 @@ slices:
       slice built it — the same gap CORE-S017 had. As the plugin ecosystem grows,
       the aggregate availability of a fail-closed chain falls with the number of
       extensions, so this becomes thesis-critical for bank-scale adoption rather
-      than a convenience. See Decisions/0004 in secondsign-memory.
+      than a convenience.
+
+  - id: CORE-S019
+    title: Standalone gateway process and a credential-free agent-side client
+    depends_on: [CORE-S017]
+    threats: [A2, A3]
+    scope:
+      - src/secondsign/**
+      - tests/redteam/**
+      - tests/architecture/**
+      - docs/**
+      - pyproject.toml
+    forbidden:
+      - a rail credential reachable from the managed agent's process
+      - a network route from the managed agent to the rail that does not pass through the gateway
+      - a process boundary that a configuration setting can collapse
+    acceptance:
+      - the gateway runs as its own process, reachable from the managed agent only through the authorization request it serves
+      - an integration test starts that process, drives an execution through the agent-side client, and asserts the client holds no rail credential at any point
+      - with the gateway process stopped, the agent-side client cannot reach the rail at all — execution becomes impossible rather than merely unauthorized
+      - the boundary depends on no configurable setting, and a red-team case asserts that no setting collapses it
+    required_tests: [redteam, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: >
+      The deployment topology is a product-scope commitment: it is what turns
+      "no bypass path" from a property of a well-behaved caller into a property
+      of the deployment. A human accepts that shape before it is built.
+    rationale: >
+      README's "Not there yet" already names this as the gap between the library
+      today and production custody of money, but no slice carried it, so the
+      admission resolved to nothing. CORE-S017 makes the control plane
+      unreachable by import structure — the precondition — and this slice makes
+      it unreachable by process and network topology, which is the claim the
+      threat model actually rests on.
+
+      Proposed by @EddyJJHuang in pull request #18. Queued here as its own slice,
+      with acceptance criteria stated so a test can settle them, rather than
+      folded into CORE-S017, whose guarantee is enforceable in-repo today.
