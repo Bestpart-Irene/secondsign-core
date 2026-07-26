@@ -12,6 +12,7 @@ The gate between an AI agent and real money.</p>
   <a href="LICENSE"><img alt="Licence: Apache-2.0" src="https://img.shields.io/badge/licence-Apache--2.0-green.svg"></a>
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue.svg">
   <a href="docs/INVARIANTS.md"><img alt="Guarantees" src="https://img.shields.io/badge/guarantees-test--enforced-green.svg"></a>
+  <a href="https://discord.gg/yQHfJGSmXn"><img alt="Discord" src="https://img.shields.io/badge/chat-Discord-5865F2.svg"></a>
 </p>
 
 ---
@@ -219,6 +220,12 @@ production custody of money.
 
 Everything needed to build on or contribute to this project is in this
 repository. Nothing here depends on a private one.
+
+## Community
+
+[Discord](https://discord.gg/yQHfJGSmXn) — questions while you are building,
+and what people are building with it. Issues and Discussions remain the durable
+record; chat is for the parts that never make it into either.
 
 ## Provenance
 
