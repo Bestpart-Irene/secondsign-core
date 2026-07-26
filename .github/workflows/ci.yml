@@ -101,17 +101,40 @@ jobs:
           done
           exit $missing
 
-      # Pull requests only. On a push the action scans `<first-sha>^..<head>`,
-      # which is an invalid revision when the range reaches the initial commit —
-      # it fails on the very first push to a new repository, which is exactly
-      # when a scan looks most reassuring and means least. The pull request is
-      # the gate that matters.
+      # Pull requests only; the pull request is the gate that matters.
+      #
+      # gitleaks is run directly rather than through its action, because the
+      # action derives its range as `<first-sha>^..<head>`. On a pull request
+      # from a fork, the parent of the branch point is not in the checkout, so
+      # git refuses the revision, gitleaks scans ~0 bytes, and the step exits
+      # non-zero having never run. That fails closed, which is the right
+      # direction — but it blocks every external contribution for a reason that
+      # has nothing to do with secrets, and a scan that cannot run is not a
+      # scan. The same range would also be invalid on the initial commit.
+      #
+      # `base..head` comes from the event payload and is the range the DCO step
+      # above has already resolved on this checkout.
       - name: Secret scan
         if: github.event_name == 'pull_request'
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_VERSION: 8.24.3
+          GITLEAKS_SHA256: 9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "/tmp/${archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  /tmp/${archive}" | sha256sum --check --strict
+          tar -xzf "/tmp/${archive}" -C /tmp gitleaks
+
+          # An empty range would scan nothing and pass, which is the failure
+          # mode this step exists to avoid.
+          test -n "$(git rev-list "${BASE_SHA}..${HEAD_SHA}")"
+
+          /tmp/gitleaks detect --redact --no-banner --exit-code 1 \
+            --log-opts="${BASE_SHA}..${HEAD_SHA}"
 
   package:
     name: Build and licence report
