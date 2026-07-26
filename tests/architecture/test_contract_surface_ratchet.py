@@ -12,13 +12,24 @@ deliberate, reviewable act the compatibility policy requires (see
 `CONTRACT_VERSION`; this test is what makes "means" enforceable rather than
 aspirational.
 
-What is locked here is the *structure* of the surface. Behavioural guarantees —
-that money is integer minor units, that boundary models are frozen, that
-combination is monotone — are held by the contract and property suites; the one
-bound this file also pins is the finding-quantity ceiling, because it is a
-structural anti-identifier control (threat A5), not a mere validation.
+What is locked here is the *structure* of the surface: published names, enum
+members, model fields, and — for every published callable — its signature
+(parameter names, kinds, order, defaults, and return annotation). A signature is
+as much a compatibility promise as a name is: renaming a parameter, making one
+keyword-only, or changing a return type breaks a caller just as surely as
+removing the function, so it too must not move without a `CONTRACT_VERSION` bump.
+The callables are discovered from the published surface rather than listed by
+hand, so a newly exported function is caught here until it is deliberately
+baselined.
+
+Behavioural guarantees — that money is integer minor units, that boundary models
+are frozen, that combination is monotone — are held by the contract and property
+suites; the two this file also pins are the finding-quantity ceiling (a
+structural anti-identifier control, threat A5) and a golden result for `combine`,
+the callable most of the extension surface routes through.
 """
 
+import inspect
 import types
 import typing
 from enum import Enum
@@ -172,6 +183,45 @@ FROZEN_MODEL_FIELDS = {
     },
 }
 
+#: Sentinel for a parameter with no default. A distinct string, so "no default"
+#: can never be confused with a real default that happens to serialise oddly.
+NO_DEFAULT = "<no default>"
+
+#: Every published callable and its frozen signature. Each parameter is
+#: ``(name, kind, type token, default token)`` in declaration order, and the
+#: return annotation is a type token in the same vocabulary as the model fields.
+#: The kind names come from :class:`inspect.Parameter` (``POSITIONAL_OR_KEYWORD``,
+#: ``KEYWORD_ONLY``, ``VAR_POSITIONAL``, …), so making a parameter keyword-only or
+#: reordering two positional ones is a change the ratchet catches.
+FROZEN_CALLABLES = {
+    "combine": {
+        "params": (
+            ("left", "POSITIONAL_OR_KEYWORD", "PluginJudgement", NO_DEFAULT),
+            ("right", "POSITIONAL_OR_KEYWORD", "PluginJudgement", NO_DEFAULT),
+        ),
+        "returns": "PluginJudgement",
+    },
+    "neutral": {
+        "params": (),
+        "returns": "PluginJudgement",
+    },
+    "render": {
+        "params": (("judgement", "POSITIONAL_OR_KEYWORD", "PluginJudgement", NO_DEFAULT),),
+        "returns": "str",
+    },
+    "render_finding": {
+        "params": (("finding", "POSITIONAL_OR_KEYWORD", "Finding", NO_DEFAULT),),
+        "returns": "str",
+    },
+    "run_plugins": {
+        "params": (
+            ("plugins", "POSITIONAL_OR_KEYWORD", "Iterable[object]", NO_DEFAULT),
+            ("view", "POSITIONAL_OR_KEYWORD", "PolicyView", NO_DEFAULT),
+        ),
+        "returns": "PluginJudgement",
+    },
+}
+
 
 def _type_token(annotation: object) -> str:
     """A stable, module-path-independent string for a field annotation.
@@ -191,6 +241,56 @@ def _type_token(annotation: object) -> str:
     name = getattr(origin, "__name__", str(origin))
     inner = ", ".join("..." if arg is Ellipsis else _type_token(arg) for arg in args)
     return f"{name}[{inner}]"
+
+
+def _annotation_token(annotation: object) -> str:
+    """A type token for a signature annotation, tolerating an unannotated slot.
+
+    ``inspect`` uses one sentinel for a missing parameter or return annotation;
+    reduce it to a stable string so *removing* an annotation is itself a change
+    the ratchet reports, rather than a crash.
+    """
+    if annotation is inspect.Signature.empty:
+        return "<unannotated>"
+    return _type_token(annotation)
+
+
+def _signature_token(func: object) -> dict[str, object]:
+    """The frozen-comparable shape of a callable's signature.
+
+    Annotations are resolved (``eval_str=True``) and reduced to the same
+    module-path-independent tokens the model-field baseline uses, so the shape is
+    stable across pydantic and typing internals while still pinning parameter
+    names, kinds, order, defaults and the return type.
+    """
+    signature = inspect.signature(func, eval_str=True)
+    params = tuple(
+        (
+            parameter.name,
+            parameter.kind.name,
+            _annotation_token(parameter.annotation),
+            NO_DEFAULT if parameter.default is inspect.Parameter.empty else repr(parameter.default),
+        )
+        for parameter in signature.parameters.values()
+    )
+    return {"params": params, "returns": _annotation_token(signature.return_annotation)}
+
+
+def _published_callables() -> dict[str, object]:
+    """Every plain function `secondsign.contracts` publishes, discovered by shape.
+
+    Only ``inspect.isfunction`` symbols are returned: classes (enums, models, the
+    ``PolicyPlugin`` protocol) and the ``Fingerprint`` alias are locked by the
+    name, enum and field baselines, and a pydantic model's generated ``__init__``
+    is already pinned field-by-field. Discovery — rather than a hand-list — is
+    what makes a newly published function fail the set check below until it is
+    deliberately baselined.
+    """
+    return {
+        name: getattr(contracts, name)
+        for name in contracts.__all__
+        if inspect.isfunction(getattr(contracts, name))
+    }
 
 
 # --- The ratchet -----------------------------------------------------------
@@ -255,3 +355,67 @@ def test_finding_quantity_bounds_are_frozen():
         le = getattr(constraints.get("le"), "le", None)
         assert ge == 0, f"Finding.{name} lower bound moved off 0"
         assert le == contracts.MAX_DETAIL_MAGNITUDE, f"Finding.{name} ceiling moved off the cap"
+
+
+def test_published_callables_are_exactly_the_frozen_set():
+    """The set of published functions may neither grow nor shrink without a bump.
+
+    Discovered from the surface, so a newly exported function fails here until it
+    is baselined in `FROZEN_CALLABLES` — the ratchet covers new symbols on its
+    own, rather than silently omitting the ones nobody remembered to add.
+    """
+    discovered = set(_published_callables())
+    assert discovered == set(FROZEN_CALLABLES), {
+        "added": sorted(discovered - set(FROZEN_CALLABLES)),
+        "removed": sorted(set(FROZEN_CALLABLES) - discovered),
+    }
+
+
+@pytest.mark.parametrize("callable_name", sorted(FROZEN_CALLABLES))
+def test_callable_signatures_are_frozen(callable_name):
+    """A published signature is a compatibility promise; lock its exact shape.
+
+    Renaming a parameter, reordering two, making one keyword-only, adding a
+    default, or changing the return type all fail this — the message says which
+    symbol moved and how, because the frozen and live shapes are both reported.
+    """
+    func = getattr(contracts, callable_name)
+    assert inspect.isfunction(func), f"{callable_name} is no longer a plain function"
+    live = _signature_token(func)
+    assert live == FROZEN_CALLABLES[callable_name], {
+        "symbol": callable_name,
+        "frozen": FROZEN_CALLABLES[callable_name],
+        "live": live,
+    }
+
+
+def test_combine_is_behaviourally_stable():
+    """A golden result for `combine` — identical inputs, identical serialised output.
+
+    The signature check pins `combine`'s shape; this pins what it *does*. Because
+    combination is the one place two judgements meet, a silent change to how it
+    merges verdicts or orders findings would alter every audit record without
+    touching a name or a type. Locking the serialised result makes that change
+    fail here too, alongside the property suite that proves the algebra's laws.
+    """
+    left = contracts.PluginJudgement(
+        verdict=contracts.PluginVerdict.REVIEW,
+        findings=(contracts.Finding(code=contracts.ReasonCode.org_policy),),
+    )
+    right = contracts.PluginJudgement(
+        verdict=contracts.PluginVerdict.DENY,
+        findings=(
+            contracts.Finding(code=contracts.ReasonCode.velocity_limit, observed=9, limit=5),
+        ),
+    )
+    expected = {
+        "contract_version": 1,
+        "verdict": 2,  # DENY — the stricter of REVIEW and DENY
+        "findings": [
+            {"code": "org_policy", "observed": None, "limit": None},
+            {"code": "velocity_limit", "observed": 9, "limit": 5},
+        ],
+    }
+    assert contracts.combine(left, right).model_dump(mode="json") == expected
+    # Commutative: the serialised record does not depend on argument order.
+    assert contracts.combine(right, left).model_dump(mode="json") == expected
