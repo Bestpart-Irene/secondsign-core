@@ -238,3 +238,103 @@ slices:
     required_tests: [redteam]
     gates: [ruff_check, ruff_format, pytest, lint_imports]
     stop_for_human: false
+
+  - id: CORE-S017
+    title: Structural control-plane isolation from the managed agent
+    depends_on: [CORE-S013]
+    threats: [A2, A3]
+    scope: ["src/secondsign/**", "tests/architecture/**"]
+    forbidden:
+      - the managed-agent surface importing any control-plane module
+      - an isolation decision that reads a configurable setting
+    acceptance:
+      - limits, approver roster, idempotency store, audit ledger and fingerprint keys are unreachable from the managed-agent surface by import structure, enforced by lint-imports and an architecture test that discovers modules rather than naming them
+      - the isolation judgement depends on no configurable policy — there is no setting whose value can make a control-plane module reachable
+      - reading any setting looser than the strictest default requires a matching, unexpired, approved ledger record; absent that, resolution falls back to strictest (a missing expiry counts as expired)
+      - INV-12's enforcement column names this slice's tests, replacing the CORE-S017 placeholder
+    required_tests: [architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: >
+      Marquee isolation invariant (INV-12). A human must confirm the guarantee
+      is structural and depends on no configurable policy before it is marked
+      complete — a control that a setting can switch off is not this control.
+    rationale: >
+      INV-12 already names CORE-S017 as its enforcer, but the slice was never
+      queued: the roadmap stopped at CORE-S016, leaving the control-plane-
+      unreachability invariant with no slice to build it. Structural precondition
+      is the control-plane components existing (approvals CORE-S011, gateway/
+      idempotency CORE-S012, audit ledger CORE-S013); it deliberately does not
+      depend on the external-rail demonstrations (CORE-S014/S015).
+
+  - id: CORE-S018
+    title: Extension health and a declared degraded state
+    depends_on: [CORE-S010]
+    threats: [A8]
+    scope:
+      - src/secondsign/health/**
+      - src/secondsign/decision/**
+      - tests/health/**
+      - tests/decision/**
+    forbidden:
+      - a degraded state that permits an action that would otherwise be denied
+      - resolving an unavailable extension to anything other than the strictest path
+      - softening any verdict to preserve availability
+    acceptance:
+      - repeated failure or timeout of an extension surfaces as an operator-visible health signal, distinct from the per-decision DENY it already produces
+      - the system can enter a declared degraded state that is observable, and entering it never lowers any verdict — a degraded extension's failures still resolve to DENY, so INV-1 is preserved unchanged
+      - property test:  for every view, the decision under a degraded state is never weaker than the decision under a healthy state
+      - degraded state changes observability and operator signalling, never the decision
+    required_tests: [unit, properties, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: >
+      Sits adjacent to the availability / fail-closed tradeoff (INV-1). A human
+      must confirm the degraded state introduces no bypass and softens no
+      verdict — the whole point is to answer the availability objection without
+      weakening the guarantee.
+    rationale: >
+      INV-1's discussion names "operator-visible extension health and a declared
+      degraded state" as the correct answer to the availability objection, but no
+      slice built it — the same gap CORE-S017 had. As the plugin ecosystem grows,
+      the aggregate availability of a fail-closed chain falls with the number of
+      extensions, so this becomes thesis-critical for bank-scale adoption rather
+      than a convenience.
+
+  - id: CORE-S019
+    title: Standalone gateway process and a credential-free agent-side client
+    depends_on: [CORE-S017]
+    threats: [A2, A3]
+    scope:
+      - src/secondsign/**
+      - tests/redteam/**
+      - tests/architecture/**
+      - docs/**
+      - pyproject.toml
+    forbidden:
+      - a rail credential reachable from the managed agent's process
+      - a network route from the managed agent to the rail that does not pass through the gateway
+      - a process boundary that a configuration setting can collapse
+    acceptance:
+      - the gateway runs as its own process, reachable from the managed agent only through the authorization request it serves
+      - an integration test starts that process, drives an execution through the agent-side client, and asserts the client holds no rail credential at any point
+      - with the gateway process stopped, the agent-side client cannot reach the rail at all — execution becomes impossible rather than merely unauthorized
+      - the boundary depends on no configurable setting, and a red-team case asserts that no setting collapses it
+    required_tests: [redteam, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: >
+      The deployment topology is a product-scope commitment: it is what turns
+      "no bypass path" from a property of a well-behaved caller into a property
+      of the deployment. A human accepts that shape before it is built.
+    rationale: >
+      README's "Not there yet" already names this as the gap between the library
+      today and production custody of money, but no slice carried it, so the
+      admission resolved to nothing. CORE-S017 makes the control plane
+      unreachable by import structure — the precondition — and this slice makes
+      it unreachable by process and network topology, which is the claim the
+      threat model actually rests on.
+
+      Proposed by @EddyJJHuang in pull request #18. Queued here as its own slice,
+      with acceptance criteria stated so a test can settle them, rather than
+      folded into CORE-S017, whose guarantee is enforceable in-repo today.
