@@ -33,6 +33,9 @@ extension by inheriting a conformance suite, not by persuading a reviewer.
   for how-to and design questions.
 - Open an [Issue](https://github.com/Bestpart-Irene/secondsign-core/issues) for
   a bug or a proposal — the templates guide what to include.
+- Ask in [Discord](https://discord.gg/yQHfJGSmXn) if you would rather type it
+  than write it up. Nothing said there is a commitment, and anything worth
+  keeping should end up in a Discussion or an Issue.
 
 ## I found a security problem
 
