@@ -14,6 +14,7 @@ Nothing here is exported from the top-level package. An agent-side caller import
 from secondsign.controlplane.relaxation import (
     Relaxation,
     RelaxationDecision,
+    Resolution,
     Setting,
     is_looser,
     resolve,
@@ -23,6 +24,7 @@ from secondsign.controlplane.relaxation import (
 __all__ = [
     "Relaxation",
     "RelaxationDecision",
+    "Resolution",
     "Setting",
     "is_looser",
     "resolve",

@@ -21,6 +21,17 @@ and removes an entire class of silent drift.
 **Tightening needs no authority.** Only loosening does. A caller asking for a
 value stricter than the default gets it — a control that made itself harder to
 strengthen would be obeyed less, not more.
+
+**Falling back strict is not enough on its own; it has to be visible.** An early
+version of this module returned the same shape whether nobody had asked for a
+relaxation or a legitimate one had silently lapsed, which meant an expired
+exception produced strict behaviour that nobody was told about. Failing closed
+without a signal is just drift in the safer direction, and the argument against it
+is the one INV-1 already makes about extension availability: the answer to
+"unavailable resolves strict" is an operator-visible state, not silence. So every
+decision carries a closed :class:`Resolution` saying *why* it resolved as it did,
+and the three refusals are distinguishable because they need different actions —
+obtain a record, renew one, or widen one.
 """
 
 from __future__ import annotations
@@ -62,6 +73,27 @@ _STRICTEST: Final[dict[Setting, int]] = {
 }
 
 
+class Resolution(StrEnum):
+    """Why a decision resolved the way it did. Closed, and never free text.
+
+    The three refusals are separate members rather than one because they call for
+    different operator actions, and a single "refused" would make an expired
+    exception look identical to one that never existed.
+    """
+
+    #: At or stricter than the default. No authority was needed or sought.
+    as_requested = "as_requested"
+    #: Looser than the default, and a matching unexpired record permitted it.
+    relaxed_by_authority = "relaxed_by_authority"
+    #: Looser than the default, and no record for this setting exists at all.
+    refused_no_record = "refused_no_record"
+    #: A record exists for this setting but has expired — or carries no expiry,
+    #: which counts as expired. The actionable case: an exception lapsed.
+    refused_expired = "refused_expired"
+    #: A live record exists but approves less than was asked for.
+    refused_insufficient = "refused_insufficient"
+
+
 class Relaxation(BaseModel):
     """An approved permission to hold one setting looser than its default.
 
@@ -82,11 +114,18 @@ class Relaxation(BaseModel):
     #: ``None`` counts as expired. See this module's docstring.
     expires_at: datetime | None = None
 
+    def is_live(self, now: datetime) -> bool:
+        """Whether this record is within its validity window.
+
+        A missing expiry is *not* live. See this module's docstring.
+        """
+        return self.expires_at is not None and now < self.expires_at
+
     def authorises(self, setting: Setting, value: int, now: datetime) -> bool:
         """True only if this record permits exactly ``value`` for ``setting`` now."""
         if self.setting is not setting:
             return False
-        if self.expires_at is None or now >= self.expires_at:
+        if not self.is_live(now):
             return False
         return value <= self.relaxed_to
 
@@ -103,10 +142,29 @@ class RelaxationDecision(BaseModel):
 
     setting: Setting
     value: int = Field(ge=0)
-    #: True only when the resolved value is looser than the strictest default.
-    relaxed: bool = False
+    #: Why this resolved as it did. An operator reads this, not the value alone.
+    resolution: Resolution
     #: The record that authorised it, or ``None`` when nothing was loosened.
     authority: Relaxation | None = None
+
+    @property
+    def relaxed(self) -> bool:
+        """Whether the resolved value is looser than the strictest default."""
+        return self.resolution is Resolution.relaxed_by_authority
+
+    @property
+    def refused(self) -> bool:
+        """Whether a relaxation was sought and not granted.
+
+        The distinction this whole type exists for: ``not relaxed`` is true both
+        when nothing was asked and when something was asked and denied, and an
+        operator whose exception lapsed needs to be able to tell those apart.
+        """
+        return self.resolution in (
+            Resolution.refused_no_record,
+            Resolution.refused_expired,
+            Resolution.refused_insufficient,
+        )
 
 
 def strictest(setting: Setting) -> int:
@@ -144,14 +202,32 @@ def resolve(
     """
     if not is_looser(setting, requested):
         # Tightening, or asking for the default. No authority needed.
-        return RelaxationDecision(setting=setting, value=requested)
+        return RelaxationDecision(
+            setting=setting, value=requested, resolution=Resolution.as_requested
+        )
 
     permitting = [record for record in records if record.authorises(setting, requested, now)]
-    if not permitting:
-        return RelaxationDecision(setting=setting, value=strictest(setting))
+    if permitting:
+        # The narrowest sufficient record, so a broad old exception does not
+        # outrank a narrow deliberate one and the decision names the authority
+        # actually relied on. Ties break on the approver handle, for determinism.
+        authority = min(permitting, key=lambda record: (record.relaxed_to, record.approver_ref))
+        return RelaxationDecision(
+            setting=setting,
+            value=requested,
+            resolution=Resolution.relaxed_by_authority,
+            authority=authority,
+        )
 
-    # The narrowest sufficient record, so a broad old exception does not outrank a
-    # narrow deliberate one and the decision names the authority actually relied
-    # on. Ties break on the approver handle to keep resolution deterministic.
-    authority = min(permitting, key=lambda record: (record.relaxed_to, record.approver_ref))
-    return RelaxationDecision(setting=setting, value=requested, relaxed=True, authority=authority)
+    # Refused — and *which* refusal is the part an operator acts on. Ordered by
+    # how close the deployment is to having authority: a live-but-narrow record
+    # needs widening, an expired one needs renewing, and neither is the same
+    # problem as never having had one.
+    for_setting = [record for record in records if record.setting is setting]
+    if any(record.is_live(now) for record in for_setting):
+        resolution = Resolution.refused_insufficient
+    elif for_setting:
+        resolution = Resolution.refused_expired
+    else:
+        resolution = Resolution.refused_no_record
+    return RelaxationDecision(setting=setting, value=strictest(setting), resolution=resolution)

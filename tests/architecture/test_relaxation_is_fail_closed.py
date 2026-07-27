@@ -28,6 +28,7 @@ from pydantic import ValidationError
 from secondsign.controlplane.relaxation import (
     Relaxation,
     RelaxationDecision,
+    Resolution,
     Setting,
     is_looser,
     resolve,
@@ -245,3 +246,109 @@ def test_a_relaxation_decision_carries_no_free_text():
     """INV-3 applies here too: this record reaches the audit trail."""
     for field in RelaxationDecision.model_fields:
         assert "reason" not in field and "note" not in field and "message" not in field
+
+
+# --------------------------------------------------------------------------
+# Failing closed is not enough on its own — the refusal has to be visible.
+# --------------------------------------------------------------------------
+
+
+def test_a_lapsed_exception_is_distinguishable_from_never_having_had_one():
+    """The defect this section exists for.
+
+    An earlier version returned the same shape whether nobody had asked for a
+    relaxation or a legitimate one had silently expired. Both fell back to
+    strictest, which is the right value — and nobody was told the exception had
+    lapsed. Failing closed without a signal is drift in the safer direction, and
+    it is the same objection INV-1 answers with an operator-visible state rather
+    than with silence.
+    """
+    setting = Setting.approval_ttl_seconds
+    lapsed = _approved(setting, value=900, expires_at=NOW - timedelta(days=1))
+
+    expired = resolve(setting, requested=900, records=(lapsed,), now=NOW)
+    never_had = resolve(setting, requested=900, records=(), now=NOW)
+
+    assert expired.value == never_had.value == strictest(setting)
+    assert expired.refused and never_had.refused
+    assert expired.resolution is Resolution.refused_expired
+    assert never_had.resolution is Resolution.refused_no_record
+    assert expired.resolution is not never_had.resolution, (
+        "an operator cannot tell a lapsed exception from one that never existed"
+    )
+
+
+def test_a_record_with_no_expiry_reads_as_expired_not_as_missing():
+    """The never-renewed exception is the lapsed case, not the absent one.
+
+    It is the one an operator is most likely to have believed was working.
+    """
+    setting = Setting.approval_ttl_seconds
+    record = _approved(setting, value=900, expires_at=None)
+    decision = resolve(setting, requested=900, records=(record,), now=NOW)
+    assert decision.resolution is Resolution.refused_expired
+
+
+def test_asking_for_more_than_approved_is_its_own_refusal():
+    """Distinct because the action is different: widen, not renew."""
+    setting = Setting.approval_ttl_seconds
+    record = _approved(setting, value=900, expires_at=NOW + timedelta(days=1))
+    decision = resolve(setting, requested=3600, records=(record,), now=NOW)
+    assert decision.resolution is Resolution.refused_insufficient
+    assert decision.value == strictest(setting)
+
+
+def test_a_live_narrow_record_outranks_an_expired_broad_one_in_the_reason():
+    """With both present, the reported reason is the one nearer to authority."""
+    setting = Setting.approval_ttl_seconds
+    decision = resolve(
+        setting,
+        requested=3600,
+        records=(
+            _approved(setting, value=7200, expires_at=NOW - timedelta(days=1), approver="old"),
+            _approved(setting, value=900, expires_at=NOW + timedelta(days=1), approver="live"),
+        ),
+        now=NOW,
+    )
+    assert decision.resolution is Resolution.refused_insufficient
+
+
+def test_a_record_for_another_setting_does_not_colour_the_reason():
+    """A live record elsewhere must not make this setting look nearly-authorised."""
+    other = _approved(
+        Setting.window_lookback_seconds, value=900, expires_at=NOW + timedelta(days=1)
+    )
+    decision = resolve(Setting.approval_ttl_seconds, requested=3600, records=(other,), now=NOW)
+    assert decision.resolution is Resolution.refused_no_record
+
+
+def test_not_asking_is_never_reported_as_a_refusal():
+    """Silence stays silent when nothing was sought — no false operator signal."""
+    for setting in Setting:
+        decision = resolve(setting, requested=strictest(setting), records=(), now=NOW)
+        assert decision.resolution is Resolution.as_requested
+        assert not decision.refused and not decision.relaxed
+
+
+def test_relaxed_and_refused_are_never_both_true():
+    setting = Setting.approval_ttl_seconds
+    record = _approved(setting, value=900, expires_at=NOW + timedelta(days=1))
+    for requested in (strictest(setting), 900, 3600):
+        decision = resolve(setting, requested=requested, records=(record,), now=NOW)
+        assert not (decision.relaxed and decision.refused)
+
+
+@pytest.mark.parametrize("resolution", list(Resolution))
+def test_every_resolution_is_reachable(resolution):
+    """A member no input can produce is a vocabulary that lies about the states."""
+    setting = Setting.approval_ttl_seconds
+    live = _approved(setting, value=900, expires_at=NOW + timedelta(days=1))
+    dead = _approved(setting, value=900, expires_at=NOW - timedelta(days=1))
+    produced = {
+        resolve(setting, requested=strictest(setting), records=(), now=NOW).resolution,
+        resolve(setting, requested=900, records=(live,), now=NOW).resolution,
+        resolve(setting, requested=900, records=(), now=NOW).resolution,
+        resolve(setting, requested=900, records=(dead,), now=NOW).resolution,
+        resolve(setting, requested=3600, records=(live,), now=NOW).resolution,
+    }
+    assert resolution in produced, f"{resolution} cannot be produced by any input"
