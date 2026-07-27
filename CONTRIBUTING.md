@@ -74,9 +74,32 @@ python tools/validate_slice.py docs/slices/roadmap.yaml
 python tools/check_slice_scope.py
 ```
 
+### On-chain slices
+
+A slice that declares `forge_fmt` or `forge_test` also runs the Solidity gates,
+in the `onchain/` verification workspace. That workspace is deliberately outside
+the Python distribution: it pins the exact Safe releases the on-chain topology
+work has to reproduce, and nothing in the published package depends on it.
+
+```bash
+cd onchain
+npm ci                        # the pinned Safe releases, from the committed lockfile
+forge fmt --check
+forge test
+```
+
+Foundry is needed only for these slices. CI installs it by pinned version and
+checksum, so match that version locally rather than tracking latest:
+
+```bash
+curl -L https://foundry.paradigm.xyz | bash && foundryup --install 1.0.0
+```
 
 All of these run in CI on every pull request, plus a secret scan, a DCO check,
-a build check, and a dependency licence review.
+a build check, and a dependency licence review. The Solidity job also re-runs
+its suite against a deliberately mutated assertion and requires that to fail —
+a gate that cannot fail is not a gate, and this way a broken or skipped install
+cannot be reported as green.
 
 ## Test layout
 

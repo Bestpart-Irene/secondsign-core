@@ -364,8 +364,12 @@ slices:
       - onchain/**
       - .github/workflows/**
       - .gitignore
+      - README.md
+      - CONTRIBUTING.md
     forbidden:
       - commercial positioning, competitive comparison or market claims in a published threat model
+      - a contributor instruction that lists "every gate" while omitting one this slice introduces
+      - a claim in README or ARCHITECTURE that on-chain execution is supported, rather than designed
       - a queued slice naming a threat id that no published threat model defines
       - a threat-id pattern so wide that an undefined or misspelled id validates
       - a validator that accepts any threat id when the threat model is missing or parses empty
@@ -383,6 +387,8 @@ slices:
       - a smoke test builds both pinned Safe releases in one suite and asserts, by behaviour rather than by reading sources, that module guard configuration exists on the fixed version and not on the earlier one
       - CI proves the Solidity gate can fail: it runs the suite against a mutated assertion on a copy of the workspace and requires a non-zero exit
       - docs/slices/roadmap.yaml still validates, and CI still validates it as the single queue file
+      - CONTRIBUTING.md's gate list runs green for a contributor who follows it, on-chain slices included — a list headed "every gate" that omits the Solidity ones would send an external contributor into a red pull request through no fault of their own
+      - README's documentation index reaches the published on-chain threat model, and ARCHITECTURE states that on-chain execution is a separate, unimplemented contract surface rather than a capability core has
     required_tests: [unit, architecture, onchain_topology]
     gates: [ruff_check, ruff_format, pytest, forge_fmt, forge_test, validate_slices]
     stop_for_human: true
