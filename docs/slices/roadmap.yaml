@@ -243,10 +243,16 @@ slices:
     title: Structural control-plane isolation from the managed agent
     depends_on: [CORE-S013]
     threats: [A2, A3]
-    scope: ["src/secondsign/**", "tests/architecture/**"]
+    scope:
+      - src/secondsign/**
+      - tests/architecture/**
+      - pyproject.toml
+      - docs/INVARIANTS.md
     forbidden:
       - the managed-agent surface importing any control-plane module
       - an isolation decision that reads a configurable setting
+      - a control-plane concern held by a module the classification does not cover
+      - a relaxation that takes effect without a matching, unexpired, approved record
     acceptance:
       - limits, approver roster, idempotency store, audit ledger and fingerprint keys are unreachable from the managed-agent surface by import structure, enforced by lint-imports and an architecture test that discovers modules rather than naming them
       - the isolation judgement depends on no configurable policy — there is no setting whose value can make a control-plane module reachable
