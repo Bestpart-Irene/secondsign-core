@@ -88,6 +88,12 @@ forge fmt --check
 forge test
 ```
 
+The lockfile resolves to two packages and nothing else. Safe declares `ethers` as
+a peer dependency, and npm would otherwise pull a JavaScript crypto stack into a
+tree that exists only so `forge` can read `.sol` files — so `onchain/.npmrc` sets
+`legacy-peer-deps`. There is no JavaScript in this workspace; if you find yourself
+needing a runtime dependency here, that is worth a conversation before a commit.
+
 Foundry is needed only for these slices. CI installs it by pinned version and
 checksum, so match that version locally rather than tracking latest:
 
