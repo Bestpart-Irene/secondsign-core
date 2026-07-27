@@ -108,6 +108,55 @@ root_package = "secondsign"
 # The plugin contract is the boundary every extension speaks through. It must
 # stay a leaf: if it ever imports policy, decision, gateway or adapter code,
 # plugins gain reach into internals and the contract stops being a contract.
+# INV-12. The agent surface is defined by what it cannot reach: an agent that can
+# reach limits, the roster, the idempotency store, the ledger or the fingerprint
+# key can raise its own limit, approve its own action, replay a spent approval,
+# edit its own history, or forge a reference.
+#
+# `forbidden` is transitive by default, so this covers a breach through an
+# intermediate module — which is the realistic one. Nobody adds
+# `from secondsign.policy import AmountLimit` to the agent surface; they add a
+# helper that happens to import it.
+#
+# The architecture suite asserts the same property by walking the import graph
+# itself. Two mechanisms on purpose: this one fails fast in one line, and that one
+# also proves every module is classified and that no unclassified module holds a
+# control-plane concern — which a static contract list cannot notice.
+[[tool.importlinter.contracts]]
+name = "The managed-agent surface must not reach the control plane (INV-12)"
+type = "forbidden"
+source_modules = ["secondsign.agent"]
+forbidden_modules = [
+    "secondsign.approval",
+    "secondsign.audit",
+    "secondsign.controlplane",
+    "secondsign.gateway",
+    "secondsign.policy",
+    "secondsign.rails",
+]
+
+# The isolation judgement must not be answerable differently by anything. A module
+# that decides which side of the boundary a module is on, and that imports a
+# domain module to do it, is a judgement with an input — and an input is something
+# an operator can change.
+[[tool.importlinter.contracts]]
+name = "The isolation judgement depends on nothing (INV-12)"
+type = "forbidden"
+source_modules = ["secondsign.isolation"]
+forbidden_modules = [
+    "secondsign.adapters",
+    "secondsign.agent",
+    "secondsign.approval",
+    "secondsign.audit",
+    "secondsign.contracts",
+    "secondsign.controlplane",
+    "secondsign.decision",
+    "secondsign.gateway",
+    "secondsign.intent",
+    "secondsign.policy",
+    "secondsign.rails",
+]
+
 [[tool.importlinter.contracts]]
 name = "Plugin contract must not depend on any other core module"
 type = "forbidden"
