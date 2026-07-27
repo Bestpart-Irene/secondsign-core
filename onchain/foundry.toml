@@ -1,0 +1,26 @@
+# The on-chain verification workspace.
+#
+# This workspace exists to answer questions about external contracts, not to
+# ship any. `src/` stays empty until a slice that produces a production guard
+# says otherwise; ONCHAIN-S001 writes tests only.
+#
+# Both Safe releases are remapped side by side on purpose: the topology
+# falsification has to reproduce the 1.4.1 behaviour and the 1.5.0 behaviour in
+# one suite, and a suite that could only build the fixed version would read as
+# though the problem never existed.
+
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+cache_path = "cache"
+libs = []
+solc = "0.8.28"
+optimizer = false
+remappings = [
+    "safe-1.4.1/=node_modules/@safe-global/safe-contracts/",
+    "safe-1.5.0/=node_modules/@safe-global/safe-smart-account/",
+]
+
+[fmt]
+line_length = 100

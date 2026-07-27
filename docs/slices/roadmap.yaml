@@ -338,3 +338,194 @@ slices:
       Proposed by @EddyJJHuang in pull request #18. Queued here as its own slice,
       with acceptance criteria stated so a test can settle them, rather than
       folded into CORE-S017, whose guarantee is enforceable in-repo today.
+
+  # --- On-chain -----------------------------------------------------------
+  #
+  # A second execution domain: agents that hold a wallet. It has its own threat
+  # numbering (C, in ONCHAIN_THREAT_MODEL.md) and its own contract surface,
+  # because on-chain risk is a different language rather than a wider version of
+  # the financial one. CORE-S020 is what admits these slices to the queue at
+  # all; the on-chain queue then starts with a falsification checkpoint rather
+  # than a build, because its topology is a claim about external contracts.
+  #
+  # Only the slices whose acceptance criteria are stable are queued here. The
+  # rest stay unqueued until ONCHAIN-S001 answers whether the topology holds —
+  # publishing acceptance criteria that rest on an unverified premise would put
+  # a promise in the public queue that the design cannot yet keep.
+
+  - id: CORE-S020
+    title: Publish the on-chain threat model and admit on-chain slices to the queue
+    depends_on: [CORE-S003]
+    threats: []
+    scope:
+      - docs/**
+      - tools/**
+      - tests/tooling/**
+      - onchain/**
+      - .github/workflows/**
+      - .gitignore
+      - README.md
+      - CONTRIBUTING.md
+    forbidden:
+      - commercial positioning, competitive comparison or market claims in a published threat model
+      - a contributor instruction that lists "every gate" while omitting one this slice introduces
+      - a claim in README or ARCHITECTURE that on-chain execution is supported, rather than designed
+      - a queued slice naming a threat id that no published threat model defines
+      - a threat-id pattern so wide that an undefined or misspelled id validates
+      - a validator that accepts any threat id when the threat model is missing or parses empty
+      - a red-team case referenced by count rather than by stable identifier
+      - copying expression from any third-party wallet, policy-engine, account-abstraction or simulation implementation
+    acceptance:
+      - docs/ONCHAIN_THREAT_MODEL.md defines C1 through C14 as `### C<n>` headings, so the same mechanical discovery that reads the financial model reads this one
+      - the published on-chain threat model carries its red-team matrix with stable identifiers of the form `C-RT-001`, and nothing references the matrix by case count
+      - the published on-chain threat model states its technical assumptions and residual risks, and contains no commercial positioning and no competitive comparison
+      - tools/validate_slice.py resolves a C-prefixed threat id against the on-chain model and an A- or B-prefixed id against the financial one; a slice naming an undefined C id fails validation
+      - the validator fails closed on a missing or empty threat model rather than accepting every well-formed id
+      - a test asserts that an undefined C id, a misspelled prefix, an out-of-range number, a cross-model id and a missing threat-model file are each rejected
+      - KNOWN_GATES gains forge_fmt and forge_test; KNOWN_TEST_CATEGORIES gains onchain_topology
+      - an onchain/ Foundry workspace pins its Safe releases in a committed lockfile, and CI installs Foundry by pinned version and checksum and runs `forge fmt --check` and `forge test`
+      - a smoke test builds both pinned Safe releases in one suite and asserts, by behaviour rather than by reading sources, that module guard configuration exists on the fixed version and not on the earlier one
+      - CI proves the Solidity gate can fail: it runs the suite against a mutated assertion on a copy of the workspace and requires a non-zero exit
+      - docs/slices/roadmap.yaml still validates, and CI still validates it as the single queue file
+      - CONTRIBUTING.md's gate list runs green for a contributor who follows it, on-chain slices included — a list headed "every gate" that omits the Solidity ones would send an external contributor into a red pull request through no fault of their own
+      - README's documentation index reaches the published on-chain threat model, and ARCHITECTURE states that on-chain execution is a separate, unimplemented contract surface rather than a capability core has
+    required_tests: [unit, architecture, onchain_topology]
+    gates: [ruff_check, ruff_format, pytest, forge_fmt, forge_test, validate_slices]
+    stop_for_human: true
+    checkpoint_reason: >
+      Publishing a threat model is irreversible, and this one carries the
+      on-chain design's whole risk analysis. A human confirms what is disclosed
+      and what is held back before it is public.
+    rationale: >
+      Depends on CORE-S003 because that slice established the public
+      contribution protocol and the slice validator this one extends. No threat
+      is declared because it addresses none directly: it is the precondition for
+      declaring any of C1 through C14 at all, since the validator rejects the C
+      prefix outright until it can resolve one. Publishing the analysis before
+      the implementation also keeps the spec-before-implementation commit
+      ordering that is this repository's independent-authorship evidence.
+
+  - id: ONCHAIN-S001
+    title: Falsify or confirm the double-guard topology on a local chain
+    depends_on: [CORE-S020]
+    threats: [C3, C11]
+    scope:
+      - onchain/test/topology/**
+      - onchain/foundry.toml
+      - docs/**
+    forbidden:
+      - a production guard or publishable guard artifact under onchain/src
+      - asserting the fixed version's repair without also reproducing the earlier version's failure
+      - a claim of coverage that rests on reading sources rather than on an executed assertion
+      - a mainnet fork, or any RPC endpoint or secret in the verification path
+      - mixing the deployment-manifest check into the topology behaviour tests
+      - copying expression from Safe's contracts or tests into anything this slice writes
+    acceptance:
+      - both pinned Safe releases are deployed fresh into one local chain from the committed lockfile, with no mainnet fork and no RPC secret
+      - a Safe with a transaction guard installed always invokes the guard on the guarded execution path, asserted by execution
+      - on the earlier release, an enabled module clearing the guard succeeds with no guard hook invoked — the failure is reproduced, not described
+      - on the fixed release, that same call is refused by the module guard
+      - a permanently reverting guard leaves a module-free account unable to execute anything at all, including the call that would remove the guard, demonstrating that no-bypass and recoverability are mutually exclusive on the earlier release
+      - deployment, initialisation and both guard configurations complete atomically; until that configuration verifies the account is not marked ready, is not funded, and can take no outbound action — inbound value is treated as a state to handle rather than a possibility to deny
+      - a module-path delegatecall is refused by the module guard on the fixed release
+      - the submitter identity a guard observes is shown to change with the relayer, and is therefore proven unusable as recovery authority
+      - with the transaction guard failing and the module guard sound, a controlled recovery path can restore the transaction guard
+      - with the module guard failing and the transaction guard sound, an ordinary account transaction can restore the module guard
+      - with both guards reverting permanently the account is still bricked, recorded as the double-failure residual risk rather than presented as solved
+      - a separate deployment-manifest check asserts the fixed release is canonical on the target chain, kept out of the topology behaviour tests so a failure in either points at its own cause
+      - the report records which assertions executed and which did not, and states that the fixed-version result alone is not evidence
+    required_tests: [onchain_topology]
+    gates: [ruff_check, ruff_format, forge_fmt, forge_test, validate_slices]
+    stop_for_human: true
+    checkpoint_reason: >
+      A falsification checkpoint, not a build. The whole no-bypass argument rests
+      on its answer, and the earlier topology was already falsified once by
+      analysis. A human confirms the assertions executed — reproducing the
+      earlier version's failure included — before anything depends on them.
+    rationale: >
+      Fresh local deployment beats a mainnet fork here: historical state is
+      irrelevant to topology behaviour, and a fork would add an RPC secret, drift
+      and flakiness to the one slice whose entire value is a reproducible answer.
+      The recovery-under-guard-failure assertions exist because the second
+      revertable guard is a risk this repair introduces, and deferring them would
+      mean building on an unmeasured bricking mode. The harness deploys contracts
+      itself, which is why the prohibition is on production artifacts under
+      onchain/src rather than on deployment as such.
+
+  - id: ONCHAIN-S002
+    title: Candidate on-chain verdict types behind an unfrozen version constant
+    depends_on: [CORE-S005, CORE-S020]
+    threats: [C5, C6]
+    scope:
+      - src/secondsign/onchain/**
+      - tests/onchain/**
+    forbidden:
+      - importing any on-chain type into secondsign.contracts or any v1 module
+      - raising CONTRACT_VERSION, or reusing the v1 version constant for the on-chain surface
+      - exporting any on-chain symbol from the top-level secondsign package
+      - declaring the on-chain surface frozen, or setting its version constant to 1, in this slice
+      - an open or free-form reason-code vocabulary
+      - a reason code that no red-team case requires
+    acceptance:
+      - the on-chain verdict, finding and judgement types exist with their own version constant set to 0, and secondsign.contracts.CONTRACT_VERSION is unchanged at 1
+      - the on-chain package is documented as experimental and unfrozen, is not exported from the top-level package, and an architecture test asserts that absence
+      - every initial on-chain reason code traces to at least one stably identified red-team case in the on-chain threat model, and a test asserts that direction is total
+      - the reason-code vocabulary is closed: an unrecognised code cannot be constructed
+      - an architecture test asserts no v1 module imports the on-chain package
+      - this slice's tests assert the on-chain version constant is still 0; it reaches 1 only in a later freeze slice
+    required_tests: [unit, contracts, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+    stop_for_human: false
+    rationale: >
+      ONCHAIN-S003 requires the strictness laws to be proven over two real
+      instances, and the on-chain judgement types do not exist yet —
+      generalising first would leave one instance and prove nothing. Depends on
+      CORE-S005 because that slice froze Policy Plugin API v1, which is what
+      makes a separate on-chain surface necessary rather than a widening of the
+      existing one. Version 0 is the point of this slice's shape: the repository
+      is public, so "candidate" has to be a structural claim — an unfrozen
+      constant and no top-level export — rather than a note in a document, or the
+      candidate is depended upon by outsiders the day it merges. Nothing here
+      depends on the topology holding, so it can proceed alongside ONCHAIN-S001.
+
+  - id: ONCHAIN-S003
+    title: Generalise the strictness algebra in a private kernel without moving the public surface
+    depends_on: [CORE-S005, ONCHAIN-S002]
+    threats: [A9]
+    scope:
+      - src/secondsign/_strictness/**
+      - src/secondsign/contracts/**
+      - src/secondsign/onchain/**
+      - tests/contracts/**
+      - tests/onchain/**
+      - tests/architecture/**
+      - pyproject.toml
+    forbidden:
+      - a change to the public signature, return type or serialised result of contracts.combine, contracts.neutral or the decision engine
+      - a type parameter appearing anywhere in the published v1 surface
+      - the private kernel being imported from outside contracts, decision or onchain
+      - a second copy of the combination laws for the on-chain domain
+      - proving the laws over one instance and asserting they hold for both
+      - relaxing or re-recording a frozen signature to make the generalisation fit
+    acceptance:
+      - the combination laws are stated once over a type parameter in a private kernel and instantiated twice, and the four property tests run against both the v1 and the on-chain instance as real instances rather than stubs
+      - the contract surface ratchet keeps passing unchanged across the generalisation, with no frozen signature re-recorded — the ratchet already locks the published callables, so it is the pre-existing guard this slice must satisfy rather than one it writes
+      - the serialised result of a v1 combination is unchanged, so the audit receipt content hash is unaffected
+      - an import-linter contract keeps the kernel private: reachable only from contracts, decision and onchain, and importing no domain module itself
+    required_tests: [unit, properties, contracts, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+    stop_for_human: true
+    checkpoint_reason: >
+      The claim is that a frozen public surface did not move (INV-15, frozen in
+      CORE-S005). A human confirms that rather than accepting a self-reported
+      test result on the repository's most compatibility-sensitive boundary.
+    rationale: >
+      A9 is declared because INV-15 maps to A9 in INVARIANTS.md and is enforced
+      by the contract surface ratchet, so citing INV-15 while declaring no threat
+      would be inconsistent. The ratchet gained callable and signature checks in
+      pull request #26, which changes this slice's shape for the better: the
+      guard now exists before the refactor rather than being written by the same
+      change it constrains, so the acceptance criterion is that an untouched
+      ratchet still passes. The private kernel is what keeps the generalisation
+      off the public surface — a public generic would change the typing surface
+      of a frozen API without changing its behaviour.

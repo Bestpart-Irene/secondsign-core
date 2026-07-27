@@ -1,0 +1,11 @@
+{
+  "name": "secondsign-onchain-verification",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pinned Safe releases for the on-chain topology verification. Not a published package and not part of the Python distribution.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@safe-global/safe-contracts": "1.4.1",
+    "@safe-global/safe-smart-account": "1.5.0"
+  }
+}

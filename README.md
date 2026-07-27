@@ -209,6 +209,7 @@ production custody of money.
 |---|---|
 | [Architecture](docs/ARCHITECTURE.md) | What core is, and what it deliberately is not |
 | [Threat model](docs/THREAT_MODEL.md) | What this defends against, and why each rule exists |
+| [On-chain threat model](docs/ONCHAIN_THREAT_MODEL.md) | What changes when the agent holds a wallet — designed, not implemented |
 | [Invariants](docs/INVARIANTS.md) | The guarantees, each bound to the test that enforces it |
 | [Extension contracts](docs/EXTENSION_CONTRACTS.md) | How to add a rail, rule or provider and certify it |
 | [Contributing](CONTRIBUTING.md) | The slice protocol and quality gates |

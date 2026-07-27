@@ -52,6 +52,13 @@ structurally unreachable from the managed agent (INV-12).
 - Multi-tenant backends, SSO, consoles, or billing.
 - Online learning or behavioural anomaly models on the live decision path.
 - Customer business logic.
+- On-chain execution. An agent that holds a wallet is a second domain with its
+  own threat numbering ([`ONCHAIN_THREAT_MODEL.md`](ONCHAIN_THREAT_MODEL.md))
+  and, when it is built, its own separately versioned contract surface — because
+  on-chain risk is a different language rather than a wider version of this one.
+  Today it is designed and queued, not implemented: no on-chain code ships in
+  this package, and the queue begins with a falsification checkpoint rather than
+  a build.
 
 The last exclusion is deliberate and worth stating plainly: velocity and
 counterparty judgements are **deterministic policy**, not learned signals.
