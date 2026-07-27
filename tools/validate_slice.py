@@ -24,7 +24,16 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-THREAT_MODEL = REPO_ROOT / "docs" / "THREAT_MODEL.md"
+
+# Which document defines which threat numbering. The financial and on-chain
+# models are separate documents because they are separate risk languages, so a
+# threat id is resolved against the one that owns its prefix rather than against
+# a merged pool — an A id must not be satisfied by an on-chain heading.
+THREAT_MODEL_SOURCES = {
+    "A": REPO_ROOT / "docs" / "THREAT_MODEL.md",
+    "B": REPO_ROOT / "docs" / "THREAT_MODEL.md",
+    "C": REPO_ROOT / "docs" / "ONCHAIN_THREAT_MODEL.md",
+}
 
 REQUIRED_KEYS = {
     "id",
@@ -46,6 +55,8 @@ KNOWN_GATES = {
     "validate_slices",
     "build",
     "dco",
+    "forge_fmt",
+    "forge_test",
 }
 KNOWN_TEST_CATEGORIES = {
     "unit",
@@ -55,21 +66,36 @@ KNOWN_TEST_CATEGORIES = {
     "architecture",
     "redteam",
     "e2e",
+    "onchain_topology",
 }
 
 ID_PATTERN = re.compile(r"^[A-Z]+-S\d{3}$")
-THREAT_PATTERN = re.compile(r"^[AB]\d{1,2}$")
+THREAT_PATTERN = re.compile(r"^[ABC]\d{1,2}$")
 
 
-def known_threats() -> set[str]:
-    """Threat ids the threat model actually defines."""
-    if not THREAT_MODEL.exists():
-        return set()
-    text = THREAT_MODEL.read_text(encoding="utf-8")
-    return set(re.findall(r"^###\s+([AB]\d{1,2})\b", text, flags=re.MULTILINE))
+def known_threats() -> dict[str, set[str]]:
+    """The threat ids each model defines, keyed by prefix.
+
+    A prefix whose document is missing, unreadable or defines no threats maps to
+    an empty set. That is not the same as "no constraint": a manifest citing
+    such a prefix is rejected, because the validator cannot tell whether the id
+    is real and guessing in the permissive direction is how a manifest comes to
+    claim coverage no document describes.
+    """
+    discovered: dict[str, set[str]] = {}
+    for prefix, path in THREAT_MODEL_SOURCES.items():
+        if not path.exists():
+            discovered[prefix] = set()
+            continue
+        text = path.read_text(encoding="utf-8")
+        pattern = rf"^###\s+({prefix}\d{{1,2}})\b"
+        discovered[prefix] = set(re.findall(pattern, text, flags=re.MULTILINE))
+    return discovered
 
 
-def check_slice(entry: dict, threats_available: set[str], all_ids: set[str]) -> list[str]:
+def check_slice(
+    entry: dict, threats_available: dict[str, set[str]], all_ids: set[str]
+) -> list[str]:
     problems: list[str] = []
     slice_id = entry.get("id", "<missing id>")
 
@@ -92,10 +118,20 @@ def check_slice(entry: dict, threats_available: set[str], all_ids: set[str]) -> 
             problems.append(f"{slice_id}: depends on unknown slice {dependency}")
 
     for threat in entry.get("threats", []) or []:
-        if not THREAT_PATTERN.match(str(threat)):
+        threat = str(threat)
+        if not THREAT_PATTERN.match(threat):
             problems.append(f"{slice_id}: malformed threat id {threat!r}")
-        elif threats_available and threat not in threats_available:
-            problems.append(f"{slice_id}: threat {threat} is not defined in the threat model")
+            continue
+        prefix = threat[0]
+        defined = threats_available.get(prefix, set())
+        source = THREAT_MODEL_SOURCES.get(prefix)
+        if not defined:
+            problems.append(
+                f"{slice_id}: threat {threat} cannot be resolved — "
+                f"{source} is missing or defines no {prefix} threats"
+            )
+        elif threat not in defined:
+            problems.append(f"{slice_id}: threat {threat} is not defined in {source}")
 
     if not entry.get("scope"):
         problems.append(f"{slice_id}: scope must list at least one path pattern")
