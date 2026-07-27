@@ -25,6 +25,13 @@ htmlcov/
 .env.*
 secrets/
 
+# On-chain verification workspace — build output and pinned dependency tree.
+# `package-lock.json` is committed; what it resolves to is not.
+onchain/node_modules/
+onchain/out/
+onchain/cache/
+onchain/broadcast/
+
 # Editor / OS
 .DS_Store
 .idea/

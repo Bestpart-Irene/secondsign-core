@@ -58,6 +58,79 @@ jobs:
           git fetch --no-tags --depth=1 origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" || true
           python tools/check_slice_scope.py
 
+  # The Solidity gates a slice declares as `forge_fmt` and `forge_test`.
+  #
+  # Foundry is pinned by version and checksum rather than taken from an action
+  # tag, for the same reason gitleaks is below: a verification job that silently
+  # changes what it runs is not a verification job. The on-chain workspace is a
+  # separate npm project — it pins the exact Safe releases the topology work has
+  # to reproduce, and it is deliberately outside the Python distribution.
+  onchain:
+    name: On-chain verification (Solidity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: onchain/package-lock.json
+
+      - name: Pinned Safe releases
+        working-directory: onchain
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Foundry
+        env:
+          FOUNDRY_VERSION: v1.0.0
+          FOUNDRY_SHA256: 8c078eaced6bfce76af902def65e36db677842ffbf53f76730647082a5b1e45a
+        run: |
+          set -euo pipefail
+          archive="foundry_${FOUNDRY_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "/tmp/${archive}" \
+            "https://github.com/foundry-rs/foundry/releases/download/${FOUNDRY_VERSION}/${archive}"
+          echo "${FOUNDRY_SHA256}  /tmp/${archive}" | sha256sum --check --strict
+          mkdir -p /tmp/foundry
+          tar -xzf "/tmp/${archive}" -C /tmp/foundry
+          echo "/tmp/foundry" >> "$GITHUB_PATH"
+
+      - name: Solidity formatting
+        working-directory: onchain
+        run: forge fmt --check
+
+      - name: On-chain topology tests
+        working-directory: onchain
+        run: forge test -vv
+
+      # A gate that cannot fail is not a gate. This runs the suite once more
+      # against a mutated assertion and requires a non-zero exit, so an empty,
+      # skipped or silently-not-installed suite cannot be reported as green.
+      # It works on a copy: the checked-out tree stays untouched.
+      - name: The Solidity gate can fail
+        working-directory: onchain
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          cp -R foundry.toml test node_modules "${scratch}/"
+          python3 - "${scratch}" <<'PY'
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          target = root / "test" / "topology" / "PinnedReleases.t.sol"
+          source = target.read_text(encoding="utf-8")
+          mutated = source.replace('"1.4.1", "1.4.1 singleton', '"9.9.9", "1.4.1 singleton')
+          if mutated == source:
+              sys.exit("FAIL: the mutation did not apply; this check would prove nothing")
+          target.write_text(mutated, encoding="utf-8")
+          PY
+          cd "${scratch}"
+          if forge test >/dev/null 2>&1; then
+            echo "FAIL: a mutated assertion still passed; the gate is not executing"
+            exit 1
+          fi
+          echo "ok: the gate fails when an assertion is false"
+
   independence:
     name: Dependency boundary and DCO
     runs-on: ubuntu-latest
