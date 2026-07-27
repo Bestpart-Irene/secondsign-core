@@ -7,6 +7,13 @@ traces to nothing gets a threat analysis or gets removed.
 Slice manifests reference these identifiers, and `tools/validate_slice.py`
 rejects a manifest citing a threat this file does not define.
 
+This file defines the A and B threats. On-chain execution — an agent that holds
+a wallet — is numbered C and lives in
+[`ONCHAIN_THREAT_MODEL.md`](ONCHAIN_THREAT_MODEL.md), because it is a different
+risk language rather than a wider version of this one. The A threats still apply
+there: an authorization layer fails in the same general ways whatever it sits in
+front of.
+
 ## Scope
 
 Protected: **the moment money moves or account control changes.** Not the
