@@ -24,13 +24,27 @@ updates:
   # The Python dependency set is small and deliberately pinned exactly in
   # `[dev]`, so this is mostly about learning that a pin has a published
   # advisory — not about tracking latest.
+  #
+  # Two groups, not one, and the split is about attribution rather than tidiness.
+  # A linter release is a *policy* change: new rules arrive enabled, and the
+  # bump lands red for reasons that have nothing to do with this repository's
+  # code. Grouped with pytest and pydantic, that red PR states "2 updates" and
+  # the reviewer has to bisect which of them caused 25 findings before they can
+  # judge either. The first such bump (#41: ruff 0.15 → 0.16, EXE001 and others)
+  # is exactly that PR.
+  #
+  # Separated, a linter bump is a self-contained question — adopt the new rules,
+  # or pin against them — and a pydantic advisory is never queued behind it.
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
     groups:
+      lint-policy:
+        patterns: ["ruff", "mypy", "import-linter"]
       python:
         patterns: ["*"]
+        exclude-patterns: ["ruff", "mypy", "import-linter"]
     commit-message:
       prefix: "chore(deps)"
 
