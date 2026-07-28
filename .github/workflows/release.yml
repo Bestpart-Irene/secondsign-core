@@ -5,6 +5,15 @@ name: Release
 # step anyone can run differently, and no API token stored anywhere. PyPI
 # authenticates the workflow itself through OIDC (trusted publishing), so a
 # leaked repository secret cannot be used to publish a release.
+#
+# Every action is pinned to a commit SHA, not a tag. A tag is a moving pointer
+# its owner can repoint at any time, so `@v4` means "whatever that account
+# publishes next" — and this workflow has permission to sign and upload the
+# artefact users install to authorize payments. Foundry and gitleaks are already
+# pinned by version and checksum in ci.yml for the same reason; leaving the
+# actions on tags left the softest link in the chain closest to the release.
+# The trailing `# v4` comment records intent so Dependabot can still offer
+# upgrades, which arrive as a reviewable diff rather than silently.
 
 on:
   push:
@@ -25,9 +34,17 @@ jobs:
   build:
     name: Build and verify the distribution
     runs-on: ubuntu-latest
+    # Narrower than it looks: `id-token` signs the attestation through OIDC and
+    # mints nothing reusable, and `attestations` writes only that record. Neither
+    # grants any ability to publish — that stays with the `pypi` environment and
+    # its required reviewer, one job further on.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
           cache: pip
@@ -65,7 +82,20 @@ jobs:
           print("ok", secondsign.__version__)
           PY
 
-      - uses: actions/upload-artifact@v4
+      # Signed provenance for the exact files that reach PyPI: which workflow,
+      # at which commit, produced this wheel. It is what lets someone verify
+      # that the artefact they installed came from this repository rather than
+      # from an account takeover, without taking the project's word for it —
+      # `gh attestation verify dist/secondsign_core-*.whl --repo <owner>/<repo>`.
+      #
+      # Attesting before upload is the point. An attestation generated after
+      # publication would describe a file that had already been trusted.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/*
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: distribution
           path: dist/
@@ -79,9 +109,9 @@ jobs:
     permissions:
       id-token: write # OIDC, in place of an API token
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { name: distribution, path: dist/ }
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
 
@@ -98,6 +128,6 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with: { name: distribution, path: dist/ }
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # release/v1
