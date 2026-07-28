@@ -313,21 +313,36 @@ slices:
     threats: [A2, A3]
     scope:
       - src/secondsign/**
+      - client/**
       - tests/redteam/**
       - tests/architecture/**
+      - tests/client/**
+      - tests/e2e/**
       - docs/**
       - pyproject.toml
     forbidden:
       - a rail credential reachable from the managed agent's process
       - a network route from the managed agent to the rail that does not pass through the gateway
       - a process boundary that a configuration setting can collapse
+      - the client distribution depending on secondsign-core, or on anything but pydantic
+      - a gateway or rail module reachable from an environment with only the client installed
+      - a wire version mismatch resolved by best-effort parsing rather than refusal
+      - the client returning any local verdict when the gateway is unreachable
     acceptance:
       - the gateway runs as its own process, reachable from the managed agent only through the authorization request it serves
       - an integration test starts that process, drives an execution through the agent-side client, and asserts the client holds no rail credential at any point
       - with the gateway process stopped, the agent-side client cannot reach the rail at all — execution becomes impossible rather than merely unauthorized
       - the boundary depends on no configurable setting, and a red-team case asserts that no setting collapses it
-    required_tests: [redteam, architecture]
-    gates: [ruff_check, ruff_format, pytest, lint_imports]
+      # The shape agreed at this checkpoint, recorded in ADR 0003. Each line is
+      # stated so a test settles it rather than a reviewer judging it.
+      - the agent-side client ships as its own distribution whose declared dependencies are pydantic alone, asserted against the built wheel's metadata rather than against a requirements list
+      - a virtual environment with only the client installed cannot import secondsign.gateway, secondsign.rails, secondsign.approval, secondsign.audit or secondsign.policy, asserted by executing the import and requiring ModuleNotFoundError
+      - the gateway refuses to start bound to a non-loopback address absent an explicit operator declaration, and a red-team case asserts that no setting makes it start bound wide by default
+      - the wire contract carries its own version constant, independent of CONTRACT_VERSION, and a client announcing an unrecognised version is refused rather than parsed on a best-effort basis
+      - a conformance kit certifies a third-party client against the wire contract, and demonstrably rejects a non-conformant one
+      - with the gateway stopped the client yields refused, never a locally computed verdict, and a test asserts no code path in the client can produce completed
+    required_tests: [redteam, architecture, conformance, e2e]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
     stop_for_human: true
     checkpoint_reason: >
       The deployment topology is a product-scope commitment: it is what turns
@@ -340,6 +355,27 @@ slices:
       unreachable by import structure — the precondition — and this slice makes
       it unreachable by process and network topology, which is the claim the
       threat model actually rests on.
+
+      The deployment shape was agreed at this slice's checkpoint and is recorded
+      in ADR 0003: the agent-side client is a separate distribution that does not
+      depend on secondsign-core. The reason is that CORE-S017's guarantee is a
+      property of this repository rather than of the process an operator runs.
+      secondsign.agent cannot import secondsign.gateway, but the agent's process
+      can — application code beside the agent may import the gateway directly.
+      What stops it today is that the process holds no credential, which is a
+      deployment fact this software does not enforce. A separate distribution
+      moves the guarantee from "it has no key" to "it has no code", which an
+      assessor can verify with a shell and no knowledge of this project.
+
+      The single-distribution sidecar over a Unix socket was the alternative, and
+      it satisfies the four original acceptance criteria with zero new
+      dependencies. It was rejected because the agent's process still contains
+      the rails, so the guarantee stays a fact about deployment; it also excludes
+      Windows and does not model the cross-host topology the threat model's "no
+      network route to the rail" actually describes. Deferring the split was
+      rejected on timing: it is a breaking change whose cost is paid by every
+      user who has already imported the agent surface from secondsign-core, and
+      that population is currently zero.
 
       Proposed by @EddyJJHuang in pull request #18. Queued here as its own slice,
       with acceptance criteria stated so a test can settle them, rather than
