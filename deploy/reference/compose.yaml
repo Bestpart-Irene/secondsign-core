@@ -27,28 +27,18 @@
 name: secondsign-reference
 
 services:
-  # Generates the ephemeral PKI, then exits. Everything else waits for it.
+  # NOTE: run `./tls/generate.sh` before `docker compose up`. The PKI is
+  # generated on the host rather than by a service here, and that is a
+  # correction rather than the original design.
   #
-  # A service rather than a documented manual step: a reference deployment whose
-  # first instruction is "now run this script" is one people will run wrong, and
-  # the failure mode is a stack that comes up with stale or absent certificates.
-  certs:
-    image: python:3.12-slim
-    # No network at all. This container generates the CA signing key, which is
-    # the most valuable secret in the deployment — something that can mint an
-    # identity outranks anything that can use one. It needs a filesystem and a
-    # copy of openssl, so it gets neither an interface nor a default network.
-    #
-    # Without this line Compose attaches it to an implicit, routable `default`
-    # network, and a demonstration whose entire claim is about network isolation
-    # would ship with a routable network in it that nobody chose.
-    network_mode: none
-    volumes:
-      - ./tls:/tls
-    working_dir: /tls
-    entrypoint: ["/bin/bash", "/tls/generate.sh"]
-    environment:
-      SECONDSIGN_CERT_LIFETIME_HOURS: "1"
+  # Generation was a Compose service until it turned out that
+  # `docker compose up certs` exits 0 when the container stops — whatever code
+  # it stopped with. The harness check on that exit code therefore could not
+  # fail: generation produced nothing, the stack came up without certificates,
+  # and the symptom appeared later as "the agent cannot read its own client
+  # key", which reads like a mount bug. `tests/deployment/conftest.py` now runs
+  # the script directly and checks that a certificate exists, because the
+  # artefact is the evidence and the exit code was not.
 
   rail:
     build:
@@ -74,7 +64,6 @@ services:
     # impossible" true rather than aspirational.
     networks: [agentnet, railnet]
     depends_on:
-      certs: {condition: service_completed_successfully}
       rail: {condition: service_healthy}
     volumes:
       # Read-only, and only this service's own directory. `tls/ca/` — which
@@ -104,8 +93,6 @@ services:
       dockerfile: agent/Dockerfile
     # One network. This line is the security control.
     networks: [agentnet]
-    depends_on:
-      certs: {condition: service_completed_successfully}
     volumes:
       - ./tls/agent:/etc/secondsign/tls:ro
       - ./adversary:/adversary:ro

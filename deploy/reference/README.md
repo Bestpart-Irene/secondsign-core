@@ -15,7 +15,8 @@ exists, not about what is permitted.
 
 ```bash
 cd deploy/reference
-docker compose up --build      # certs are generated automatically
+./tls/generate.sh              # ephemeral PKI, never committed
+docker compose up --build
 docker compose down -v
 ```
 

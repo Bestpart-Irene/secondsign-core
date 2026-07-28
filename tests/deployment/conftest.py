@@ -139,12 +139,32 @@ def stack() -> Stack:
     if _run("info").returncode != 0:
         pytest.fail("the Docker daemon is not reachable; this gate cannot run, so it fails.")
 
-    # Blocking, not detached: this one runs to completion and its exit status is
-    # the answer. A stack that comes up with no certificates fails later, in
-    # places that look like TLS bugs.
-    certs = _compose("up", "--build", "certs")
-    if certs.returncode != 0:
-        pytest.fail(f"certificate generation failed:\n{certs.stdout}\n{certs.stderr}")
+    # Generated on the host, not in a container, and checked for output rather
+    # than for an exit code.
+    #
+    # Both halves of that are scar tissue. The first attempt ran generation as a
+    # Compose service and trusted `docker compose up certs`, which returns 0 when
+    # the container stops — whatever exit code it stopped with. So the check
+    # could not fail: generation produced nothing, the fixture reported success,
+    # and the failure surfaced four tests later as "the agent cannot read its own
+    # client key", which reads like a mount bug.
+    #
+    # Running it on the host also removes a guess about what a base image ships.
+    # `openssl` and `bash` are present on any developer machine and on the CI
+    # runner; whether `python:3.12-slim` carries the openssl CLI is a question
+    # this suite has no reason to depend on.
+    generated = subprocess.run(  # noqa: S603 — fixed path inside the repository
+        ["/bin/bash", str(REFERENCE / "tls" / "generate.sh")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    client_cert = REFERENCE / "tls" / "agent" / "client-cert.pem"
+    if generated.returncode != 0 or not client_cert.exists():
+        pytest.fail(
+            "certificate generation did not produce a client certificate.\n"
+            f"exit={generated.returncode}\n{generated.stdout}\n{generated.stderr}"
+        )
 
     ready = _compose("up", "-d", "--build", "--wait", RAIL, AGENT)
     if ready.returncode != 0:
