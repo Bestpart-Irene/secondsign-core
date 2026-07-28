@@ -46,8 +46,8 @@ stripe = ["stripe>=15,<16"]
 dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
-    "ruff==0.15.22",
-    "hypothesis==6.161.0",
+    "ruff==0.16.0",
+    "hypothesis==6.162.0",
     "import-linter==2.13",
     "mypy==2.3.0",
     "pyyaml==6.0.3",
@@ -95,7 +95,15 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-extend-select = ["I", "B", "S"]
+# Stated, not inherited. `extend-select` extends whatever the linter's default
+# set happens to be, so a version bump can add or drop rules and change what
+# this gate means without a line of this file changing — which is how a pinned
+# toolchain stops being deterministic. `select` names the rules the project has
+# decided on; adopting a new one is then its own change, argued on its merits.
+#
+# E4/E7/E9 + F is pycodestyle-and-pyflakes minus the formatter's territory; I is
+# import order, B is bugbear, S is bandit.
+select = ["E4", "E7", "E9", "F", "I", "B", "S"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
