@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/secondsign-wordmark-dark.png">
-    <img src="docs/assets/secondsign-wordmark.png" alt="SecondSign" width="360">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/secondsign-wordmark-dark2.png">
+    <img src="docs/assets/secondsign-wordmark2.png" alt="SecondSign" width="180">
   </picture>
 </p>
 
