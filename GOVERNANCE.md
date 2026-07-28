@@ -68,10 +68,14 @@ what the extension contracts exist for.
 
 ## Provenance
 
-Every commit carries a DCO sign-off. See
+Every commit carries a DCO sign-off, enforced in CI from the first commit. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-Without it, copyright in a multi-contributor project ends up distributed
-across every individual author, and no one — not even the maintainers — can
-then answer a provenance question on the project's behalf. The requirement is
-enforced in CI from the first commit for exactly that reason.
+It certifies the right to submit, and it leaves a named assertion of origin
+against every commit. It is **not** a copyright assignment and **not** a CLA:
+contributors keep copyright in their contributions, the project receives the
+inbound licence Apache-2.0 §5 grants and nothing wider, and no maintainer
+acquires a right to relicense anyone's work. Relicensing, dual-licensing or a
+proprietary grant would each need a separate instrument agreed with
+contributors — a legal question, and therefore a maintainer checkpoint (§5
+above), not something the sign-off already settled.
