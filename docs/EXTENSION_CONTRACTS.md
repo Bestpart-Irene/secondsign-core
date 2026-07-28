@@ -14,8 +14,13 @@ stays quiet.
 
 ```python
 from secondsign.contracts import (
-    CONTRACT_VERSION, Finding, PluginJudgement, PluginVerdict, PolicyView,
-    ReasonCode, RiskBand,
+    CONTRACT_VERSION,
+    Finding,
+    PluginJudgement,
+    PluginVerdict,
+    PolicyView,
+    ReasonCode,
+    RiskBand,
 )
 
 
