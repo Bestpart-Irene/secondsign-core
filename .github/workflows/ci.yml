@@ -40,14 +40,29 @@ jobs:
       - name: Types
         run: mypy src
 
+      # README states branch coverage is 100%. A claim about this repository that
+      # only a convention keeps true is the kind of drift this project cannot
+      # afford, so the gate is set where the claim is rather than below it.
+      # Coverage is an execution measure, not evidence the assertions are right —
+      # it belongs here as a ratchet, and nowhere as a security argument.
       - name: Tests (unit, properties, contracts, conformance, architecture)
-        run: pytest --cov=secondsign --cov-report=term-missing --cov-fail-under=90
+        run: pytest --cov=secondsign --cov-report=term-missing --cov-fail-under=100
 
       - name: Import and architecture boundaries
         run: lint-imports
 
       - name: Slice manifests
         run: python tools/validate_slice.py docs/slices/roadmap.yaml
+
+      # STATUS.md is derived from the roadmap and from Git, and committed only so
+      # it renders on GitHub. Checking it here is what keeps it a derived artefact
+      # instead of a second place the project's status has to be maintained — and
+      # a stale status table is precisely the drift that costs a security project
+      # its credibility.
+      - name: Roadmap status table is not stale
+        run: |
+          git fetch --no-tags --depth=50 origin main:refs/remotes/origin/main || true
+          python tools/render_roadmap.py --check
 
       # The manifest already promises which files a slice may touch. Checking
       # that promise mechanically is what stops "while I was in there" changes

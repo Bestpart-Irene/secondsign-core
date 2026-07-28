@@ -9,6 +9,8 @@
 The gate between an AI agent and real money.</p>
 
 <p align="center">
+  <a href="https://pypi.org/project/secondsign-core/"><img alt="PyPI" src="https://img.shields.io/pypi/v/secondsign-core.svg"></a>
+  <a href="https://github.com/Bestpart-Irene/secondsign-core/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Bestpart-Irene/secondsign-core/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="Licence: Apache-2.0" src="https://img.shields.io/badge/licence-Apache--2.0-green.svg"></a>
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue.svg">
   <a href="docs/INVARIANTS.md"><img alt="Guarantees" src="https://img.shields.io/badge/guarantees-test--enforced-green.svg"></a>
@@ -40,6 +42,15 @@ SecondSign answers it the same way every time.
 > **The test that falsifies a deployment:** turn SecondSign off. If the agent
 > can still move money, you have not installed a boundary — you have installed a
 > library it is free to skip.
+
+**Today, core does not yet pass its own test.** The deployment shape that makes
+it pass — a standalone gateway process holding the credentials, with the agent
+on the other side of a process boundary — is specified and queued as
+[`CORE-S019`](docs/slices/roadmap.yaml), not built. Run in-process, as it ships
+now, SecondSign is a control your own code chooses to route through: right for
+development and evaluation, not yet for production custody of money. The rest of
+this README describes what the engine does; [Status](#status) says how far the
+deployment story has actually got.
 
 ## What happens to a request
 
@@ -195,13 +206,20 @@ Pre-1.0. Interfaces may still change.
 plugin boundary, intent, policy, the decision engine, maker-checker approval,
 the execution gateway, the hash-chained audit receipt, Stripe and Alpaca
 adapters, the conformance kits, and an adversarial matrix run against the threat
-model. The test suite covers 100% of branches.
+model. Branch coverage is 100%, enforced by CI rather than asserted here — but
+read that as an engineering signal, not as evidence of security. It says every
+branch was executed by some test. It does not say the tests assert the right
+things, and it is not a substitute for the independent review this project has
+not yet had.
 
 **Not there yet:** the deployment shape that makes no-bypass real for you — a
 standalone gateway process with a control-plane store the agent cannot reach —
-plus a first-class agent-facing integration surface. Today, running the library
-inside your agent's process is right for development and testing, not for
-production custody of money.
+plus a first-class agent-facing integration surface ([`CORE-S019`](docs/slices/roadmap.yaml)).
+Today, running the library inside your agent's process is right for development
+and testing, not for production custody of money.
+
+Where each queued slice actually stands, derived from Git rather than
+hand-maintained: [`docs/slices/STATUS.md`](docs/slices/STATUS.md).
 
 ## Documentation
 
@@ -217,7 +235,9 @@ production custody of money.
 | [Security](SECURITY.md) | How to report a vulnerability, privately |
 | [Support](SUPPORT.md) | Where to start reading, building, and asking |
 | [Releasing](docs/RELEASING.md) | How a version reaches PyPI |
+| [Changelog](CHANGELOG.md) | What changed in each release |
 | [Roadmap](docs/slices/roadmap.yaml) | The build queue, machine-validated |
+| [Status](docs/slices/STATUS.md) | Where each slice stands, derived from Git |
 
 Everything needed to build on or contribute to this project is in this
 repository. Nothing here depends on a private one.
