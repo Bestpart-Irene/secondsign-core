@@ -31,6 +31,16 @@ require that the committed copy matches what this tool produces. That keeps it
 a derived artefact — like a lockfile — rather than a second place to maintain
 the truth.
 
+The rendered text names no ref and carries no timestamp, so the same repository
+state produces the same bytes everywhere. An earlier draft printed which ref the
+history came from, which made the output differ between a developer's checkout
+(`origin/main`) and a shallow CI one (`HEAD`) — a check that fails on the
+environment rather than on the content teaches people to ignore it.
+
+`--check` therefore refuses to answer at all when the checkout is too shallow to
+attribute any slice, rather than reporting everything as unbuilt. Judging
+staleness from a history you cannot see is the fail-open version of this gate.
+
     python tools/render_roadmap.py            # write docs/slices/STATUS.md
     python tools/render_roadmap.py --check    # fail if the committed copy is stale
     python tools/render_roadmap.py --stdout   # print, write nothing
@@ -148,7 +158,7 @@ def row(manifest: dict[str, Any], status: dict[str, str]) -> str:
     return f"| `{slice_id}`{checkpoint} | {title} | {waiting} |"
 
 
-def render(slices: dict[str, dict[str, Any]], status: dict[str, str], ref: str) -> str:
+def render(slices: dict[str, dict[str, Any]], status: dict[str, str]) -> str:
     groups: dict[str, list[dict[str, Any]]] = {"complete": [], "ready": [], "blocked": []}
     for slice_id, manifest in slices.items():
         groups[status[slice_id]].append(manifest)
@@ -162,7 +172,7 @@ def render(slices: dict[str, dict[str, Any]], status: dict[str, str], ref: str) 
         "The human-readable view of [`roadmap.yaml`](roadmap.yaml), which stays the",
         "queue of record. Nothing here is stored: status is derived from Git each time",
         "this file is generated, and CI fails if the committed copy has drifted from",
-        f"what the tool produces. History read from `{ref}`.",
+        "what the tool produces.",
         "",
         "A slice is **complete** when the trunk carries the merge of a branch named for",
         "it, or when a complete slice depends on it. It is **ready** when every",
@@ -212,15 +222,27 @@ def main(argv: list[str]) -> int:
         print(f"FAIL: no slices in {display(ROADMAP)}")
         return 1
 
-    ref = trunk()
-    complete = close_over_dependencies(attributed_to_git(ref) & slices.keys(), slices)
-    rendered = render(slices, classify(slices, complete), ref)
+    attributed = attributed_to_git(trunk()) & slices.keys()
+    complete = close_over_dependencies(attributed, slices)
+    rendered = render(slices, classify(slices, complete))
 
     if args.stdout:
         print(rendered, end="")
         return 0
 
     if args.check:
+        # A shallow checkout can see no merge commits at all, which would render
+        # every slice as unbuilt and report the committed file as stale for a
+        # reason that has nothing to do with it. Refusing to answer is the honest
+        # outcome: the caller must deepen the history, which is what the CI step
+        # does before running this.
+        if not attributed:
+            print(
+                "FAIL: no slice is attributable from this checkout, so staleness\n"
+                "cannot be judged. Deepen the history first:\n"
+                "  git fetch --no-tags --depth=200 origin main:refs/remotes/origin/main"
+            )
+            return 1
         current = STATUS.read_text(encoding="utf-8") if STATUS.exists() else ""
         if current == rendered:
             print(f"ok: {display(STATUS)} matches the roadmap")

@@ -59,9 +59,16 @@ jobs:
       # instead of a second place the project's status has to be maintained — and
       # a stale status table is precisely the drift that costs a security project
       # its credibility.
+      #
+      # The fetch is not optional. The default checkout is shallow, and the tool
+      # refuses to judge staleness from a history in which it can attribute no
+      # slice at all — reporting everything as unbuilt would be the fail-open
+      # form of this check. This step is also where freshness against the real
+      # repository is asserted; the test suite deliberately does not, so that it
+      # keeps passing on a shallow clone.
       - name: Roadmap status table is not stale
         run: |
-          git fetch --no-tags --depth=50 origin main:refs/remotes/origin/main || true
+          git fetch --no-tags --depth=200 origin main:refs/remotes/origin/main
           python tools/render_roadmap.py --check
 
       # The manifest already promises which files a slice may touch. Checking

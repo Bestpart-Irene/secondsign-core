@@ -137,10 +137,38 @@ class TestGitAttribution:
         assert found == []
 
 
-class TestCommittedCopyIsFresh:
-    def test_check_passes_against_the_committed_status(self) -> None:
-        """The gate CI runs. A red result here means: regenerate STATUS.md."""
-        assert renderer.main(["render_roadmap.py", "--check"]) == 0
+class TestRenderedTextIsEnvironmentIndependent:
+    """The output must depend on the repository, and on nothing else.
+
+    An earlier draft printed which ref the history was read from. That made a
+    developer's checkout (`origin/main`) and a shallow CI one (`HEAD`) produce
+    different bytes from identical content, so `--check` failed on the
+    environment. A gate that fails for reasons unrelated to what it guards is
+    one people learn to re-run rather than read.
+    """
+
+    def test_no_ref_name_or_timestamp_leaks_into_the_output(self) -> None:
+        slices = _slices(("S1", []), ("S2", ["S1"]))
+
+        rendered = renderer.render(slices, renderer.classify(slices, complete={"S1"}))
+
+        for leak in ("origin/main", "HEAD", "refs/"):
+            assert leak not in rendered
+
+    def test_the_same_inputs_render_identically(self) -> None:
+        slices = _slices(("S1", []), ("S2", ["S1"]))
+        status = renderer.classify(slices, complete={"S1"})
+
+        assert renderer.render(slices, status) == renderer.render(slices, status)
+
+
+class TestCheckRefusesRatherThanGuessing:
+    """`--check` is the gate; these are the two ways it must not go quietly green.
+
+    Freshness against the real repository is asserted by the CI step, which
+    deepens the history first. Asserting it here as well would make this suite
+    fail on a shallow clone — the exact environment-dependence above.
+    """
 
     def test_check_fails_when_the_committed_copy_drifts(self, tmp_path: Path) -> None:
         """A gate that cannot fail is not a gate."""
@@ -153,7 +181,19 @@ class TestCommittedCopyIsFresh:
         finally:
             renderer.STATUS = original
 
+    def test_check_refuses_when_no_slice_is_attributable(self, monkeypatch) -> None:
+        """A shallow checkout must not be read as "nothing has been built".
+
+        Rendering every slice as unbuilt and then reporting the committed file
+        as stale would be the fail-open form of this gate: it answers from a
+        history it cannot see.
+        """
+        monkeypatch.setattr(renderer, "attributed_to_git", lambda ref: set())
+
+        assert renderer.main(["render_roadmap.py", "--check"]) == 1
+
     def test_the_committed_copy_covers_every_slice(self) -> None:
+        """Independent of Git: every queued slice appears somewhere in the table."""
         import yaml
 
         document = yaml.safe_load(renderer.ROADMAP.read_text(encoding="utf-8"))

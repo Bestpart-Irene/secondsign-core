@@ -6,7 +6,7 @@
 The human-readable view of [`roadmap.yaml`](roadmap.yaml), which stays the
 queue of record. Nothing here is stored: status is derived from Git each time
 this file is generated, and CI fails if the committed copy has drifted from
-what the tool produces. History read from `origin/main`.
+what the tool produces.
 
 A slice is **complete** when the trunk carries the merge of a branch named for
 it, or when a complete slice depends on it. It is **ready** when every
