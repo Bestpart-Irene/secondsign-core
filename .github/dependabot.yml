@@ -1,0 +1,45 @@
+# Pinning every action to a commit SHA removes the silent-upgrade risk and
+# replaces it with a staleness one: a pinned action never picks up its own
+# security fixes. Dependabot is the other half of that trade — it proposes the
+# new SHA as a pull request, which runs the full gate suite and gets read by a
+# person, instead of the change arriving between two runs of the same workflow.
+#
+# Grouped into one pull request per ecosystem per week. Six separate bumps is
+# how a maintainer learns to merge them without reading, which would give back
+# the property the pinning was for.
+
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(ci)"
+
+  # The Python dependency set is small and deliberately pinned exactly in
+  # `[dev]`, so this is mostly about learning that a pin has a published
+  # advisory — not about tracking latest.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # The on-chain workspace pins the exact Safe releases the topology work has to
+  # reproduce. An upgrade there changes what the verification means, so it is
+  # deliberately a decision rather than a routine bump — open a slice, do not
+  # merge a bot's diff.
+  - package-ecosystem: npm
+    directory: /onchain
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
