@@ -37,20 +37,35 @@ Both are configured in a browser and cannot be scripted.
 # 1. Bump the single source of truth.
 $EDITOR src/secondsign/__init__.py        # __version__ = "0.2.0"
 
-# 2. Ship the bump through the normal review path.
+# 2. Move Unreleased into a dated section, and note anything that changed
+#    the public surface — pre-1.0 does not mean unannounced.
+$EDITOR CHANGELOG.md
+
+# 3. Ship both through the normal review path.
 git checkout -b chore/release-0.2.0
 git commit -s -am "chore: release 0.2.0"
 gh pr create --fill && gh pr merge --merge   # after CI is green
 
-# 3. Tag the merged commit. The tag is the release.
+# 4. Tag the merged commit. The tag is the release.
 git checkout main && git pull
 git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0
+
+# 5. Publish the GitHub release from the changelog section, so the tag, PyPI
+#    and the releases page tell one story rather than three.
+gh release create v0.2.0 --title "v0.2.0" --notes-file <(
+  awk '/^## \[0.2.0\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md
+)
 ```
 
 The workflow then verifies that the tag matches the packaged version, builds the
 wheel and sdist, checks the metadata, installs the wheel into a clean
 environment and imports it, and waits for the environment approval before
 uploading.
+
+Step 5 is not decoration. A version that exists on PyPI with no corresponding
+GitHub release leaves someone assessing the project unable to see what changed
+without reading the diff — and for a security library, "read the diff" is not an
+answer.
 
 To rehearse without touching PyPI: Actions → Release → Run workflow → `testpypi`.
 
