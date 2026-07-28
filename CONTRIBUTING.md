@@ -1,5 +1,51 @@
 # Contributing to SecondSign Core
 
+## Your first contribution, in six commands
+
+The rest of this file is the full protocol. This is the part that trips people
+up, and it is short:
+
+```bash
+# 1. Identity — every commit here is signed off, and the sign-off must name you.
+git config user.name  "Your Name"
+git config user.email "you@example.com"
+
+# 2. Branch. The prefix matters: CI reads it.
+#    docs/… or chore/… for documentation and housekeeping — no slice needed.
+#    fix/<SLICE-ID>/… or feat/<SLICE-ID>/… when you touch src/ — needs a slice
+#    manifest as the first commit; the issue you picked up names the id.
+git checkout -b docs/your-change
+
+# 3. Install, including the dev toolchain the gates use.
+pip install -e ".[dev]"
+
+# 4. Commit with -s. Without it CI fails, and the fix is a rebase.
+git commit -s -m "docs: what you changed"
+
+# 5. Run the gates before you push. They are the same ones CI runs.
+ruff check . && ruff format --check . && mypy src && pytest && lint-imports
+
+# 6. Push and open a pull request.
+git push -u origin HEAD
+```
+
+**If CI fails on the sign-off**, nothing is broken — it is fixable in one
+command, and the failure message prints it:
+
+```bash
+git rebase origin/main --exec 'git commit --amend --no-edit -s'
+git push --force-with-lease
+```
+
+You do not need to add yourself to [`CONTRIBUTORS.md`](CONTRIBUTORS.md). It is
+generated from the Git history after your change merges.
+
+Issues labelled [`good first
+issue`](https://github.com/Bestpart-Irene/secondsign-core/labels/good%20first%20issue)
+each carry their scope, acceptance criteria, the commands to run, and the branch
+name to use. If any step here is unclear, say so in the issue — the protocol
+being unclear is a defect in this file.
+
 ## Developer Certificate of Origin (required)
 
 Every commit must carry a `Signed-off-by` line:
