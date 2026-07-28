@@ -314,12 +314,16 @@ slices:
     scope:
       - src/secondsign/**
       - client/**
+      - deploy/**
       - tests/redteam/**
       - tests/architecture/**
       - tests/client/**
       - tests/e2e/**
       - docs/**
+      - tools/**
+      - tests/tooling/**
       - pyproject.toml
+      - .github/workflows/**
     forbidden:
       - a rail credential reachable from the managed agent's process
       - a network route from the managed agent to the rail that does not pass through the gateway
@@ -328,6 +332,10 @@ slices:
       - a gateway or rail module reachable from an environment with only the client installed
       - a wire version mismatch resolved by best-effort parsing rather than refusal
       - the client returning any local verdict when the gateway is unreachable
+      - describing the absence of a module as the no-bypass boundary rather than as one term of it
+      - a no-bypass claim demonstrated only by running the sanctioned client, rather than by adversarial code
+      - a non-loopback listener that authenticates no peer, or that relies on an operator declaration alone
+      - a deployment precondition presented as an enforced guarantee, or omitted from the residual-risk statement
     acceptance:
       - the gateway runs as its own process, reachable from the managed agent only through the authorization request it serves
       - an integration test starts that process, drives an execution through the agent-side client, and asserts the client holds no rail credential at any point
@@ -336,13 +344,26 @@ slices:
       # The shape agreed at this checkpoint, recorded in ADR 0003. Each line is
       # stated so a test settles it rather than a reviewer judging it.
       - the agent-side client ships as its own distribution whose declared dependencies are pydantic alone, asserted against the built wheel's metadata rather than against a requirements list
-      - a virtual environment with only the client installed cannot import secondsign.gateway, secondsign.rails, secondsign.approval, secondsign.audit or secondsign.policy, asserted by executing the import and requiring ModuleNotFoundError
-      - the gateway refuses to start bound to a non-loopback address absent an explicit operator declaration, and a red-team case asserts that no setting makes it start bound wide by default
+      - a virtual environment with only the client installed cannot import secondsign.gateway, secondsign.rails, secondsign.approval, secondsign.audit or secondsign.policy, asserted by executing the import and requiring ModuleNotFoundError — recorded as one term of no-bypass, never as the boundary itself
       - the wire contract carries its own version constant, independent of CONTRACT_VERSION, and a client announcing an unrecognised version is refused rather than parsed on a best-effort basis
       - a conformance kit certifies a third-party client against the wire contract, and demonstrably rejects a non-conformant one
       - with the gateway stopped the client yields refused, never a locally computed verdict, and a test asserts no code path in the client can produce completed
-    required_tests: [redteam, architecture, conformance, e2e]
-    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+      # The conjunction, demonstrated where hostile code actually runs. A package
+      # split proves one term; these prove the rest, or the slice is not done.
+      - deploy/reference/ carries a two-network topology — agent network and rail network, joined only by the gateway — that an operator can copy, and CI stands it up
+      - the adversarial suite runs INSIDE the agent container and is written against the standard library, not against the client, so it tests the environment rather than the sanctioned path
+      - adversarial code opening a raw socket or an HTTP connection to the mock rail's address from the agent container fails to connect, and the failure is asserted to be unreachability rather than an authorization refusal
+      - from that same container the gateway is reachable, so the test distinguishes a working network from a blocked one and cannot pass by everything being down
+      - the gateway container reaches the mock rail, and the rail credential is present in the gateway's environment and absent from the agent's, each asserted by inspection rather than by configuration review
+      - with the gateway container stopped, no path from the agent container reaches the rail — neither through the client nor through the standard library — and the mock rail records zero requests for the whole case
+      - a case asserts the mock rail received exactly the requests the gateway dispatched and no others, so a bypass that succeeds is detected at the destination rather than inferred from the source
+      - the gateway refuses to start bound to a non-loopback address unless given a client CA and its own certificate, verifies the client certificate on every connection, and a red-team case asserts that no setting produces an unauthenticated off-loopback listener
+      - THREAT_MODEL.md states which terms of no-bypass this software enforces and which are deployment preconditions — network isolation, no package installation combined with egress, no container escape or host privilege, correct credential placement — and names each unenforced term as residual risk
+      - documentation nowhere describes ModuleNotFoundError, or the package split alone, as proof that the agent cannot move money
+      - KNOWN_GATES and KNOWN_TEST_CATEGORIES gain deployment_topology, and a test asserts the validator rejects an unregistered category so the queue cannot cite a gate that does not run
+      - CI proves the deployment gate can fail: it re-runs the adversarial suite against a topology with the two networks joined, and requires the direct-to-rail case to succeed there — a suite that passes because nothing is listening proves nothing
+    required_tests: [redteam, architecture, conformance, e2e, deployment_topology]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices, deployment_topology]
     stop_for_human: true
     checkpoint_reason: >
       The deployment topology is a product-scope commitment: it is what turns
@@ -376,6 +397,30 @@ slices:
       rejected on timing: it is a breaking change whose cost is paid by every
       user who has already imported the agent surface from secondsign-core, and
       that population is currently zero.
+
+      The first draft of this checkpoint called ModuleNotFoundError in the agent
+      environment "the boundary". That was an overclaim, corrected before any
+      implementation. The absence of a module proves that one process does not
+      contain the gateway, and nothing more: an agent can open a socket with the
+      standard library, install stripe or secondsign-core, read a misplaced
+      credential, or use an egress path the host already has. No-bypass is a
+      conjunction — no credential, no route to the rail, only a route to the
+      gateway, and no ability to change any of it — and a package split buys one
+      term while making two others checkable.
+
+      Hence the deployment_topology criteria. The adversarial suite runs inside
+      the agent container and is written against the standard library rather than
+      against the client, because a demonstration that the sanctioned client
+      behaves correctly tests the sanctioned path and says nothing about an agent
+      that has stopped cooperating. Two criteria keep that suite from passing
+      vacuously: the gateway must be reachable from the same container, and the
+      mock rail must record exactly the gateway's dispatches and no others.
+
+      The two terms this software cannot enforce — network isolation, and the
+      absence of package installation combined with egress, container escape or
+      host privilege — are deployment preconditions and are required to appear in
+      THREAT_MODEL.md as residual risk. A slice that shipped them as guarantees
+      would be making the claim this correction exists to prevent.
 
       Proposed by @EddyJJHuang in pull request #18. Queued here as its own slice,
       with acceptance criteria stated so a test can settle them, rather than

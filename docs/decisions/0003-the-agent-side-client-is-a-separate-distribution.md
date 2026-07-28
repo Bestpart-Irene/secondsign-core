@@ -50,9 +50,32 @@ An agent host installs `secondsign-client`. A gateway host installs
 ModuleNotFoundError: No module named 'secondsign'
 ```
 
-That traceback is the boundary. It is not a rule, a setting, or a review
-convention — it is the absence of the code, verifiable by anyone with a shell on
-the agent host and no knowledge of this project.
+**That traceback is evidence, not the boundary.** An earlier draft of this ADR
+called it the boundary, and that was an overclaim of exactly the kind this
+project exists to argue against. It proves one thing — this process does not
+contain the gateway or a rail adapter — and one thing only. It does not prove
+that money cannot move, because an agent that wants to bypass has other routes:
+
+- open a socket to the rail with the standard library, no SDK required;
+- `pip install stripe`, or `pip install secondsign-core`, and re-acquire the code;
+- read a rail credential that was mounted into the wrong container;
+- reach the payment service through an egress path the host already has.
+
+No-bypass is a **conjunction**, and every term is required:
+
+```text
+    the agent process holds no rail credential
+  ∧ the agent process has no network route to the rail
+  ∧ its only route out is the gateway
+  ∧ the agent cannot alter any of the above
+```
+
+The separate distribution buys the first term structurally and makes the second
+and third *checkable*. It buys none of them on its own. Whether the whole
+conjunction holds is a property of a **deployment**, and `CORE-S019` is
+therefore not finished by a package split — it is finished by an executable
+demonstration of the conjunction in an environment where hostile code is
+actually running.
 
 Three constraints follow, and each is a test rather than a paragraph:
 
@@ -74,6 +97,53 @@ Three constraints follow, and each is a test rather than a paragraph:
    speaking a mismatched contract version has its judgement discarded (ADR
    0002): a peer speaking a different dialect may mean something different by
    `DENY`.
+
+4. **A non-loopback listener requires mutual TLS, not merely an operator's
+   say-so.** On loopback the process boundary is the authentication: only code
+   on that host can connect. Off it, nothing about "the operator explicitly
+   allowed `0.0.0.0`" identifies the peer, encrypts the request, or stops a
+   captured one being replayed — an authorization request is exactly the
+   message an attacker most wants to replay. So the gateway refuses to start
+   bound off-loopback unless it is given a client CA and its own certificate,
+   and it verifies the client certificate on every connection. Replay is bounded
+   by the intent's existing validity window and its idempotency reservation
+   rather than by a new mechanism; the wire contract states that dependence
+   explicitly so it is reviewable rather than incidental.
+
+## Assumptions, and what is residual risk
+
+The conjunction above has four terms. This software can enforce two of them.
+The other two are **deployment preconditions**, and naming which is which is the
+difference between a security claim and a marketing one.
+
+**Enforced by the software, and tested:**
+
+- The agent-side distribution contains no gateway, rail adapter or
+  control-plane module.
+- The gateway holds the only rail credential, and no response it returns carries
+  one — the outcome model is closed and already forbids it.
+- The gateway refuses to start off-loopback without mutual TLS.
+
+**Deployment preconditions — assumed, not defended, and stated in the threat
+model as residual risk:**
+
+- The agent's network namespace has no route to the rail. Core cannot enforce
+  this; it can only demonstrate it in a reference deployment and give operators
+  something to copy.
+- The agent cannot install packages, or can but still has no route out. Package
+  installation is *not* a blocked capability; it is irrelevant only because the
+  second term holds. An agent that can install `stripe` **and** reach the
+  internet has bypassed SecondSign, and no packaging decision prevents that.
+- The agent cannot escape its container, gain host privilege, or read the
+  gateway's environment or filesystem. A container escape defeats this design
+  completely, and that is accepted rather than mitigated.
+- The rail credential is mounted only into the gateway. A misdelivered secret
+  defeats the first term directly.
+
+The honest summary: **the package split makes bypass require a deployment
+failure or a privilege escalation, instead of requiring only an import.** That
+is a real and large improvement. It is not the same sentence as "the agent
+cannot move money", and this ADR will not print the second sentence.
 
 ## Alternatives considered
 
@@ -121,7 +191,28 @@ will ever have.
   development, evaluation and testing. What changes is that the honest
   deployment now exists, so README can stop describing an aspiration.
 
-- **This ADR does not make the falsification test pass.** It states the shape.
-  `CORE-S019` makes it pass, and the criterion is the red-team case: with the
-  gateway process stopped, execution must be *impossible* rather than merely
-  unauthorized.
+- **A reference deployment becomes part of the deliverable**, not an example
+  bolted on afterwards. `deploy/reference/` carries a two-network topology, CI
+  stands it up, and the adversarial suite runs *inside the agent container*:
+
+  ```text
+  agent container ──internal net── gateway container ──rail net── mock rail
+        ×──────────────────────────────────────────────────────────┘
+                        no route, asserted by hostile code
+  ```
+
+  The adversarial cases are written against the **standard library**, not
+  against `secondsign-client`. A demonstration that the sanctioned client
+  behaves correctly tests the sanctioned path; it says nothing about an agent
+  that has stopped cooperating, which is the only agent worth defending against.
+  Two cases keep it honest: the gateway must be *reachable* from that same
+  container, so the suite cannot pass by everything being down; and the mock
+  rail must record exactly the gateway's dispatches and no others, so a
+  successful bypass is caught at the destination rather than inferred from the
+  source.
+
+- **This ADR does not make the falsification test pass, and neither does the
+  package split.** It states the shape and buys one term of the conjunction.
+  `CORE-S019` is finished when the adversarial suite demonstrates the rest —
+  with the gateway container stopped, no path from the agent container reaches
+  the rail, and the mock rail records zero requests for the whole case.
