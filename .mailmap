@@ -1,0 +1,16 @@
+# One person, one entry.
+#
+# Git identity is whatever `user.name` and `user.email` were set to on the
+# machine that made the commit, so the same person becomes two contributors the
+# first time they use a different laptop. This file is where that is corrected,
+# and it corrects it everywhere at once: `git shortlog`, `git log %aN`, the
+# generated CONTRIBUTORS.md, and GitHub's own blame all read it.
+#
+# Format: the canonical identity first, then the one to fold into it.
+#
+#     Canonical Name <canonical@email>  Other Name <other@email>
+#
+# Adding an entry rewrites no history and changes no commit; it only changes how
+# the same commits are attributed when they are read.
+
+irene-the-best <xxiellan@gmail.com> Irene <xxiellan@gmail.com>
