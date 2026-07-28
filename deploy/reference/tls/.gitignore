@@ -1,0 +1,11 @@
+# Everything generate.sh produces is ephemeral and must never be committed.
+#
+# Allow-list rather than deny-list, on purpose. A rule like `*.pem` looks
+# sufficient until someone adds a `.key`, a `.p12` or a serial file, and the
+# repository whose premise is a clean auditable record acquires a private key in
+# its history — which cannot be removed, only rotated and apologised for.
+#
+# So: ignore everything here, then re-admit the two files that belong.
+*
+!.gitignore
+!generate.sh

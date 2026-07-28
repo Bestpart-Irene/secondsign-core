@@ -112,7 +112,24 @@ class Stack:
 
 @pytest.fixture(scope="session")
 def stack() -> Stack:
-    """Bring the reference deployment up for the session, and tear it down."""
+    """Bring the reference deployment up for the session, and tear it down.
+
+    Services come up in two groups, and the split is deliberate rather than an
+    optimisation. `certs`, `rail` and `agent` are brought up and waited for: if
+    any of them fails, no case in this suite means anything and the whole
+    session should stop.
+
+    `gateway` is started **best-effort**. While `CORE-S019` is incomplete it
+    cannot start at all, and waiting on it would abort the session — reporting
+    "the stack did not come up" for every case, including the network-isolation
+    ones that are perfectly testable without it.
+
+    Letting it fail per-case gives a far more useful signal. The isolation
+    results go green while `TestTheSuiteIsNotVacuous` stays red, which is the
+    suite saying exactly the right thing: *the agent could not reach the rail,
+    and you may not yet conclude anything from that, because I have not shown
+    you it could reach anything at all.*
+    """
     if not COMPOSE_FILE.exists():
         pytest.fail(
             f"no reference deployment at {COMPOSE_FILE.relative_to(REPO_ROOT)}.\n"
@@ -122,9 +139,22 @@ def stack() -> Stack:
     if _run("info").returncode != 0:
         pytest.fail("the Docker daemon is not reachable; this gate cannot run, so it fails.")
 
-    up = _compose("up", "-d", "--build", "--wait")
-    if up.returncode != 0:
-        pytest.fail(f"the reference deployment did not come up:\n{up.stdout}\n{up.stderr}")
+    # Blocking, not detached: this one runs to completion and its exit status is
+    # the answer. A stack that comes up with no certificates fails later, in
+    # places that look like TLS bugs.
+    certs = _compose("up", "--build", "certs")
+    if certs.returncode != 0:
+        pytest.fail(f"certificate generation failed:\n{certs.stdout}\n{certs.stderr}")
+
+    ready = _compose("up", "-d", "--build", "--wait", RAIL, AGENT)
+    if ready.returncode != 0:
+        pytest.fail(
+            f"the agent and rail containers did not come up, so nothing in this "
+            f"suite can be believed:\n{ready.stdout}\n{ready.stderr}"
+        )
+
+    # Best-effort. Its absence is reported by the cases that need it.
+    _compose("up", "-d", "--build", GATEWAY)
 
     try:
         yield Stack()

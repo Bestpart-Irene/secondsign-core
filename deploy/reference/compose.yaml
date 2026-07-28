@@ -1,0 +1,125 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The reference deployment: a topology in which no-bypass is a property of the
+# network rather than of the agent's good behaviour.
+#
+#   agent ──agentnet── gateway ──railnet── rail
+#     ×────────────────────────────────────┘
+#
+# `agent` is joined to `agentnet` and nothing else. There is no firewall rule
+# doing this and no policy to misconfigure: the container has no interface on
+# the network the rail is on, so "the agent cannot reach the rail" is a fact
+# about what exists rather than about what is permitted. That distinction is
+# what `tests/deployment/` asserts by errno — ECONNREFUSED would mean a control
+# is running and declining, and a running control can be turned off.
+#
+# Both networks are `internal: true`, so neither has a route off the host. That
+# models the deployment precondition honestly: an agent that can reach the open
+# internet can reach a payment API, and no packaging or process decision in this
+# project prevents that. See docs/decisions/0003 and README.md.
+#
+# WHAT THIS DOES NOT DEMONSTRATE, stated here because a compose file reads as an
+# endorsement: bind mounts are not a secret store, containers are not a security
+# boundary against a host-privileged attacker, and a container escape defeats all
+# of this. It demonstrates network isolation and custody separation. Nothing more.
+
+name: secondsign-reference
+
+services:
+  # Generates the ephemeral PKI, then exits. Everything else waits for it.
+  #
+  # A service rather than a documented manual step: a reference deployment whose
+  # first instruction is "now run this script" is one people will run wrong, and
+  # the failure mode is a stack that comes up with stale or absent certificates.
+  certs:
+    image: python:3.12-slim
+    # No network at all. This container generates the CA signing key, which is
+    # the most valuable secret in the deployment — something that can mint an
+    # identity outranks anything that can use one. It needs a filesystem and a
+    # copy of openssl, so it gets neither an interface nor a default network.
+    #
+    # Without this line Compose attaches it to an implicit, routable `default`
+    # network, and a demonstration whose entire claim is about network isolation
+    # would ship with a routable network in it that nobody chose.
+    network_mode: none
+    volumes:
+      - ./tls:/tls
+    working_dir: /tls
+    entrypoint: ["/bin/bash", "/tls/generate.sh"]
+    environment:
+      SECONDSIGN_CERT_LIFETIME_HOURS: "1"
+
+  rail:
+    build:
+      context: .
+      dockerfile: rail/Dockerfile
+    networks: [railnet]
+    environment:
+      RAIL_PORT: "9000"
+      RAIL_LEDGER: /var/log/rail/requests.jsonl
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('127.0.0.1',9000),timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/reference/gateway/Dockerfile
+    # The only container on both networks. That is the whole design: it is the
+    # single point at which a request can cross from the agent's world into the
+    # rail's, which is what makes "stop the gateway and execution becomes
+    # impossible" true rather than aspirational.
+    networks: [agentnet, railnet]
+    depends_on:
+      certs: {condition: service_completed_successfully}
+      rail: {condition: service_healthy}
+    volumes:
+      # Read-only, and only this service's own directory. `tls/ca/` — which
+      # holds the signing key — is mounted into nothing at all: an agent that
+      # could read it could mint a certificate naming itself any principal.
+      - ./tls/gateway:/etc/secondsign/tls:ro
+    environment:
+      # The rail credential lives here and nowhere else. `tests/deployment/`
+      # asserts its presence here and its absence from the agent.
+      SECONDSIGN_RAIL_API_KEY: "sk_reference_not_a_real_key"
+      SECONDSIGN_RAIL_URL: "http://rail:9000"
+      SECONDSIGN_BIND: "0.0.0.0:8787"
+      SECONDSIGN_TLS_CERT: /etc/secondsign/tls/gateway-cert.pem
+      SECONDSIGN_TLS_KEY: /etc/secondsign/tls/gateway-key.pem
+      SECONDSIGN_CLIENT_CA: /etc/secondsign/tls/ca-cert.pem
+      SECONDSIGN_CLIENT_ALLOWLIST: "spiffe://secondsign.example/agent/reference"
+    command: ["python", "-m", "secondsign.gateway.server"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('127.0.0.1',8787),timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    # One network. This line is the security control.
+    networks: [agentnet]
+    depends_on:
+      certs: {condition: service_completed_successfully}
+    volumes:
+      - ./tls/agent:/etc/secondsign/tls:ro
+      - ./adversary:/adversary:ro
+    # Deliberately no SECONDSIGN_RAIL_API_KEY, and deliberately no mount of
+    # ./tls/ca or ./tls/gateway. The agent holds its own client key — it must,
+    # or it could not authenticate — and nothing else. "The agent container
+    # holds no credential" would be false, and the suite does not claim it.
+    command: ["sleep", "infinity"]
+
+networks:
+  # No route off the host on either. An agent with general egress has bypassed
+  # this design regardless of what SecondSign does, and pretending otherwise
+  # would make the demonstration weaker than it looks.
+  agentnet:
+    internal: true
+  railnet:
+    internal: true
