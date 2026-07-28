@@ -84,7 +84,17 @@ include = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# `deployment` is deselected by default because it needs Docker and a built
+# reference stack, which no contributor should have to install to run the unit
+# suite. It is not optional, though — it is its own CI gate (`deployment_topology`),
+# and there it runs with `-m deployment` and fails rather than skips when Docker
+# is missing. Deselected-by-default and skipped-when-unavailable are different
+# things: the first is a choice about which gate you are running, the second is a
+# gate reporting green having verified nothing.
+addopts = "-q -m 'not deployment'"
+markers = [
+    "deployment: runs against the containerised reference deployment (CORE-S019)",
+]
 
 [tool.coverage.run]
 source = ["secondsign"]
