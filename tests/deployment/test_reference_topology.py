@@ -49,6 +49,13 @@ GATEWAY_PORT = 8787
 #: The variable a rail credential would arrive in.
 CREDENTIAL_VARIABLE = "SECONDSIGN_RAIL_API_KEY"
 
+#: Where the harness mounts generated key material, read-only, per ADR 0004 §3.
+#: Files rather than environment variables: a mount can be scoped per container,
+#: and an environment variable is inherited by every child process.
+MOUNT_ROOT = "/etc/secondsign/tls"
+CLIENT_KEY_PATH = f"{MOUNT_ROOT}/client-key.pem"
+CLIENT_CERT_PATH = f"{MOUNT_ROOT}/client-cert.pem"
+
 #: Errnos that mean "there is no route", as opposed to "something said no".
 #: EHOSTUNREACH and ENETUNREACH are unambiguous. ETIMEDOUT is included because a
 #: silently dropping network boundary is the common shape in practice; a refusal
@@ -169,6 +176,119 @@ class TestCredentialLocality:
 
         assert CREDENTIAL_VARIABLE not in result.stdout
         assert "sk_" not in result.stdout
+
+
+class TestKeyCustodySeparation:
+    """Which container holds which key (ADR 0004 §3).
+
+    The reference deployment does not pretend to be a secret store. It generates
+    an ephemeral CA and leaves at start-up, commits nothing, and mounts material
+    read-only. What it demonstrates is *custody separation*, and these cases are
+    that demonstration.
+    """
+
+    def test_the_agent_holds_its_own_client_key(self, stack: Stack) -> None:
+        """Stated first, because the next three would otherwise read as a stronger
+        claim than this deployment makes.
+
+        The agent container *does* hold a credential: its client private key. It
+        has to, or it could not authenticate. "The agent holds no credential"
+        would be false, and asserting it would repeat the error of calling
+        `ModuleNotFoundError` the boundary.
+        """
+        result = stack.exec(AGENT, "test", "-r", CLIENT_KEY_PATH)
+
+        assert result.returncode == 0, "the agent cannot read its own client key"
+
+    def test_the_agent_cannot_reach_the_gateway_key(self, stack: Stack) -> None:
+        assert self._search(stack, AGENT, "gateway") == [], (
+            "gateway key material is visible from the agent container"
+        )
+
+    def test_the_agent_cannot_reach_the_ca_signing_key(self, stack: Stack) -> None:
+        """The one that would let an agent mint its own identity."""
+        assert self._search(stack, AGENT, "ca-key") == [], (
+            "the CA signing key is visible from the agent container; "
+            "an agent that can sign can name itself any principal it likes"
+        )
+
+    def test_the_rail_credential_is_nowhere_in_the_agent_container(self, stack: Stack) -> None:
+        """Environment and filesystem both, because either would be enough."""
+        env = stack.exec(AGENT, "printenv")
+        files = self._search(stack, AGENT, "rail")
+
+        assert CREDENTIAL_VARIABLE not in env.stdout
+        assert files == []
+
+    @staticmethod
+    def _search(stack: Stack, service: str, needle: str) -> list[str]:
+        """Filenames under the mount root whose name matches ``needle``.
+
+        Deliberately a filename search rather than a content scan: the point is
+        that the material is not *delivered* here at all, which is a stronger
+        and more stable property than no file happening to contain a key today.
+        """
+        result = stack.exec(service, "sh", "-c", f"ls -1 {MOUNT_ROOT} 2>/dev/null || true")
+        return [name for name in result.stdout.split() if needle in name]
+
+
+class TestCertificateLifetime:
+    """Short-lived certificates are the whole revocation story (ADR 0004 §4).
+
+    There is no CRL and no OCSP. A leaked certificate stays valid until it
+    expires, so how long that is *is* the security property, not a detail.
+    """
+
+    def test_the_client_certificate_expires_within_the_hour(self, stack: Stack) -> None:
+        result = stack.exec(
+            AGENT,
+            "python",
+            "-c",
+            "import datetime, ssl, sys\n"
+            f"info = ssl._ssl._test_decode_cert('{CLIENT_CERT_PATH}')\n"
+            "end = datetime.datetime.strptime(info['notAfter'], '%b %d %H:%M:%S %Y %Z')\n"
+            "start = datetime.datetime.strptime(info['notBefore'], '%b %d %H:%M:%S %Y %Z')\n"
+            "print(int((end - start).total_seconds()))\n",
+        )
+
+        assert result.returncode == 0, f"could not read the client certificate: {result.stderr!r}"
+        assert int(result.stdout.strip()) <= 3600, (
+            "the reference deployment must issue 1-hour client certificates; "
+            "a longer one weakens the only revocation mechanism there is"
+        )
+
+
+class TestThePrincipalCannotBeSelfAsserted:
+    """Scope comes from the authenticated caller, never from what a request says.
+
+    This is the sentence ADR 0004 exists to protect, tested at the wire: a body
+    that carries a principal must be **refused**, not accepted-and-ignored.
+    Ignoring it leaves a field that a later change can quietly start honouring.
+    """
+
+    def test_a_body_supplied_principal_is_refused(self, stack: Stack) -> None:
+        script = (
+            "import json, sys, urllib.error, urllib.request\n"
+            "body = json.dumps({'client_principal': 'sppiffe://impersonated'}).encode()\n"
+            f"req = urllib.request.Request('http://{GATEWAY_HOST}:{GATEWAY_PORT}/authorize',"
+            " data=body, headers={'Content-Type': 'application/json'})\n"
+            "try:\n"
+            "    urllib.request.urlopen(req, timeout=5)\n"
+            "except urllib.error.HTTPError as exc:\n"
+            "    print(exc.code)\n"
+            "    sys.exit(0)\n"
+            "except OSError as exc:\n"
+            "    print(f'transport:{exc}')\n"
+            "    sys.exit(0)\n"
+            "print('accepted')\n"
+        )
+
+        result = stack.exec(AGENT, "python", "-c", script)
+
+        assert "accepted" not in result.stdout, (
+            "the gateway accepted a request carrying its own principal; "
+            "scope must derive from the TLS session alone"
+        )
 
 
 class TestWithTheGatewayStopped:

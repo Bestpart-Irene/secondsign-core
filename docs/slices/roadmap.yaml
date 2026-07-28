@@ -337,6 +337,13 @@ slices:
       - a no-bypass claim demonstrated only by running the sanctioned client, rather than by adversarial code
       - a non-loopback listener that authenticates no peer, or that relies on an operator declaration alone
       - a deployment precondition presented as an enforced guarantee, or omitted from the residual-risk statement
+      - a ClientPrincipal that can become a MakerIdentity or a CheckerIdentity, or that grants any permission
+      - a principal read from a request body, or a body-supplied principal accepted and ignored rather than refused
+      - an idempotency namespace an agent can choose, or a reservation key omitting the authenticated principal
+      - a committed private key, or test key material delivered by environment variable rather than read-only mount
+      - a certificate accepted without expiry, a setting that disables time validation, or a client leaf accepted beyond 24 hours
+      - claiming the agent container holds no credential, when it holds its own client key
+      - describing the absence of CRL or OCSP as anything other than "no online revocation; a leaked certificate stays valid until it expires"
     acceptance:
       - the gateway runs as its own process, reachable from the managed agent only through the authorization request it serves
       - an integration test starts that process, drives an execution through the agent-side client, and asserts the client holds no rail credential at any point
@@ -358,7 +365,20 @@ slices:
       - the gateway container reaches the mock rail, and the rail credential is present in the gateway's environment and absent from the agent's, each asserted by inspection rather than by configuration review
       - with the gateway container stopped, no path from the agent container reaches the rail — neither through the client nor through the standard library — and the mock rail records zero requests for the whole case
       - a case asserts the mock rail received exactly the requests the gateway dispatched and no others, so a bypass that succeeds is detected at the destination rather than inferred from the source
-      - the gateway refuses to start bound to a non-loopback address unless given a client CA and its own certificate, verifies the client certificate on every connection, and a red-team case asserts that no setting produces an unauthenticated off-loopback listener
+      # ADR 0004. A client certificate authenticates a workload and derives
+      # policy scope; it is never an approval identity and never grants
+      # permission. Everything here keeps that sentence true.
+      - a client certificate authenticates a workload and derives policy scope, and an architecture test asserts no path converts a ClientPrincipal into a MakerIdentity or a CheckerIdentity
+      - ClientPrincipal is derived from the TLS session alone; a request carrying or overriding a principal is refused rather than ignored, asserted by a red-team case
+      - the principal comes from a single URI SAN, and a certificate with no identity SAN, more than one, a malformed one, or one absent from the allowlist is refused at connection time
+      - audit records carry a keyed fingerprint of the principal and never the raw SAN
+      - an idempotency reservation binds the authenticated principal together with request_ref and intent_digest, and a red-team case shows one workload cannot consume or collide with another's reservation by choosing its request_ref
+      - the gateway refuses to start bound to a non-loopback address unless it has a server certificate, its key, a client CA bundle, client-certificate verification enabled, a minimum TLS version, a derivable principal and fail-closed handling of unknown principals; a red-team case asserts that a server certificate without client verification is refused rather than warned about
+      - client leaf validity longer than 24 hours is refused, notBefore/notAfter/key-usage/client-auth EKU are strictly verified, and no setting disables time validation
+      - the CA bundle accepts an overlapping old and new CA so rotation needs no downtime, and removing a principal or CA from the allowlist takes effect on restart or atomic reload
+      - the reference deployment generates an ephemeral CA and leaves at start-up, commits no private key, delivers them as read-only file mounts, and issues 1-hour client certificates
+      - an adversarial case walks the agent container's environment and mounts and finds no gateway key, no CA signing key and no rail credential — while the client private key is present, because claiming the agent holds no credential at all would be false
+      - documentation states that a Compose mount demonstrates custody separation and gives no secret-at-rest guarantee, and that there is no online revocation so a leaked certificate stays valid until it expires
       - THREAT_MODEL.md states which terms of no-bypass this software enforces and which are deployment preconditions — network isolation, no package installation combined with egress, no container escape or host privilege, correct credential placement — and names each unenforced term as residual risk
       - documentation nowhere describes ModuleNotFoundError, or the package split alone, as proof that the agent cannot move money
       - KNOWN_GATES and KNOWN_TEST_CATEGORIES gain deployment_topology, and a test asserts the validator rejects an unregistered category so the queue cannot cite a gate that does not run
