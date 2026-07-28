@@ -78,6 +78,9 @@ include = [
     "NOTICE",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
+    # Shipped because the suite asserts against it: the contributor list is a
+    # copyright record, and a test that reads it has to find it here too.
+    "CONTRIBUTORS.md",
     "GOVERNANCE.md",
     "pyproject.toml",
 ]
