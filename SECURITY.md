@@ -67,6 +67,47 @@ a contractual SLA.
 - Vulnerabilities in a dependency — report those upstream; tell us if core's use
   of it is what makes it exploitable.
 
+## Verifying what you installed
+
+Releases carry signed [build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds).
+The attestation records which workflow, at which commit, produced the exact file
+you have — so you can check that a wheel came from this repository rather than
+from a compromised publisher account, without taking this project's word for it:
+
+```bash
+pip download --no-deps --no-binary :none: secondsign-core==<version>
+gh attestation verify secondsign_core-<version>-py3-none-any.whl \
+  --repo Bestpart-Irene/secondsign-core
+```
+
+Two limits worth stating, because a signature invites more trust than it earns:
+
+- Provenance attests **where an artefact came from, not that it is correct.** A
+  faithfully built release of vulnerable code verifies perfectly.
+- Attestation began with the first release built by the current workflow. Older
+  artefacts have none, and their absence is not evidence of tampering.
+
+Every GitHub Action used in CI and in the release workflow is pinned to a commit
+SHA rather than a tag, so what runs cannot change without a reviewed diff. The
+same already applied to Foundry and gitleaks, which are pinned by version and
+verified by checksum.
+
+## What this project has not done
+
+Stated here rather than left for a reader to discover:
+
+- **No independent security audit.** The invariants are each bound to an
+  enforcing test and the red-team matrix is executed on every run, but nobody
+  outside the project has reviewed this code. Branch coverage of 100% is an
+  engineering signal — it means every branch executed, not that the assertions
+  are right.
+- **No process boundary yet.** Core runs inside your agent's process today. The
+  standalone gateway process is specified as `CORE-S019` and is not built, so
+  "the agent cannot reach the rail" is currently a property of how you deploy,
+  not of this software. See [Status](README.md#status).
+- **No SBOM published yet**, and no OpenSSF Scorecard. Both are wanted; neither
+  exists.
+
 ## Supported versions
 
 Core is pre-1.0. Fixes land on `main` and in the next release; there is no
