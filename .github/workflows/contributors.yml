@@ -33,8 +33,23 @@ jobs:
       pull-requests: write
     steps:
       # The full history, or the tool sees one author and refuses to judge.
+      #
+      # The token matters more than it looks. GitHub deliberately does not start
+      # workflow runs from events made with the default `GITHUB_TOKEN`, so a
+      # pull request opened with it arrives carrying **no checks at all** — and
+      # `main` requires five, which makes that pull request permanently
+      # unmergeable. Not a failure anyone would see: the job goes green, the
+      # pull request appears, and it simply never becomes mergeable.
+      #
+      # `CONTRIBUTORS_TOKEN` is a fine-grained personal access token scoped to
+      # this repository with Contents: write and Pull requests: write. With it,
+      # the refresh behaves like anyone else's pull request. Without it the
+      # workflow still runs and still opens the pull request — it just has to be
+      # closed and reopened by hand to pick up CI, which the body says.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.CONTRIBUTORS_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
@@ -44,7 +59,7 @@ jobs:
 
       - name: Open a pull request if someone new arrived
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CONTRIBUTORS_TOKEN || secrets.GITHUB_TOKEN }}
           BRANCH: chore/contributors-refresh
         run: |
           set -euo pipefail
@@ -84,5 +99,12 @@ jobs:
                 '' \
                 'If a name looks wrong or doubled, the fix is `.mailmap` rather than' \
                 'this file — one entry there corrects the attribution everywhere at' \
-                'once, including GitHub'"'"'s own blame.')"
+                'once, including GitHub'"'"'s own blame.' \
+                '' \
+                '---' \
+                '' \
+                'If this pull request shows no checks, the repository has no' \
+                '`CONTRIBUTORS_TOKEN` secret and it was opened with the default' \
+                'token, whose events deliberately start no workflow runs. Close and' \
+                'reopen it to run CI, or add the token — see the workflow comment.')"
           fi
