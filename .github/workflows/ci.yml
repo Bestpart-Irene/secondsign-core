@@ -197,48 +197,15 @@ jobs:
       # the merge commit GitHub writes for it has no sign-off and no way to
       # acquire one — leaving it in the range fails every branch that takes the
       # supported route to becoming mergeable.
-      # When it fails it prints the fix. A first contribution is where this step
-      # fails, the person hitting it has usually never rewritten a branch
-      # before, and "missing DCO sign-off: 4f2a1c9" is a bare fact rather than
-      # an instruction. Two outside contributions have already met this the hard
-      # way: one sat unmerged for days on the rebase it needed, and one arrived
-      # signed off with the placeholder address from a template.
+      #
+      # The rules, and the message a failure prints, live in the tool — where
+      # they are covered by tests. A gate whose logic sits inline in a workflow
+      # can only be exercised by pushing a branch that violates it.
       - name: Every commit is signed off (DCO)
-        run: |
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
-          if [ -z "$base" ]; then echo "not a pull request; skipping"; exit 0; fi
-          missing=0
-          for sha in $(git rev-list --no-merges "$base..$head"); do
-            if ! git log -1 --format=%B "$sha" | grep -qi "^Signed-off-by:"; then
-              echo "missing DCO sign-off: $sha $(git log -1 --format=%s "$sha")"
-              missing=1
-            fi
-          done
-          if [ "$missing" -ne 0 ]; then
-            cat <<'FIX'
-
-          ── How to fix this ──────────────────────────────────────────────────
-
-          Every commit needs a `Signed-off-by:` line naming you. It certifies
-          that you have the right to submit the work under Apache-2.0; it is not
-          a copyright assignment. See CONTRIBUTING.md.
-
-          Set your identity, then sign off every commit on this branch:
-
-            git config user.name  "Your Name"
-            git config user.email "you@example.com"
-
-            git rebase origin/main --exec 'git commit --amend --no-edit -s'
-            git push --force-with-lease
-
-          Use the name and address you would put on an email. A placeholder
-          certifies nothing, and this is a permanent, public record.
-
-          ─────────────────────────────────────────────────────────────────────
-          FIX
-          fi
-          exit $missing
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python tools/check_dco.py
 
       # Pull requests only; the pull request is the gate that matters.
       #
