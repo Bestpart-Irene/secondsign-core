@@ -7,8 +7,10 @@ up, and it is short:
 
 ```bash
 # 1. Identity — every commit here is signed off, and the sign-off must name you.
+#    CI checks it: your real name and an address that could reach you.
+#    A placeholder or an example.com address is rejected.
 git config user.name  "Your Name"
-git config user.email "you@example.com"
+git config user.email "you@example.com"   # ← your real address, not this one
 
 # 2. Branch. The prefix matters: CI reads it.
 #    docs/… or chore/… for documentation and housekeeping — no slice needed.
@@ -75,6 +77,20 @@ right to relicense a contribution**, and it does not consolidate copyright in
 any one person. Copyright in a multi-contributor project is distributed across
 its authors whether or not a DCO is in force — the DCO changes what is *known*
 about each contribution's origin, not who owns it.
+
+**What CI actually checks** (`tools/check_dco.py`), because a gate that only
+looked for the shape of a sign-off let a template placeholder through once:
+
+1. every non-merge commit carries a `Signed-off-by:` trailer;
+2. one of its trailers names the commit's **author or its committer** — the
+   second because DCO 1.1 §(c) covers passing along work received from someone
+   else, where the trailer belongs to whoever submitted it;
+3. the address could be an address — ASCII, `local@domain.tld`, not a reserved
+   example domain, not a known template value.
+
+Rule 3 is a heuristic and cannot be complete: nothing in a repository can verify
+that a person exists, because verifying an address means sending mail to it. It
+raises the cost of signing off carelessly, and that is all it claims to do.
 
 **Why this project enforces it from the first commit anyway:** a provenance
 record has to be built as the commits land. Reconstructing one afterwards means
