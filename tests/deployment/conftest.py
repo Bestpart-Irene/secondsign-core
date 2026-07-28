@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -149,12 +150,15 @@ def stack() -> Stack:
     # and the failure surfaced four tests later as "the agent cannot read its own
     # client key", which reads like a mount bug.
     #
-    # Running it on the host also removes a guess about what a base image ships.
-    # `openssl` and `bash` are present on any developer machine and on the CI
-    # runner; whether `python:3.12-slim` carries the openssl CLI is a question
-    # this suite has no reason to depend on.
+    # Running it on the host also removed a guess about what a base image ships,
+    # and the generator is now Python rather than a shell script for a related
+    # reason: it used `openssl x509 -not_after`, which is the only way that CLI
+    # expresses a sub-day lifetime and is recent enough to be present on a
+    # developer's OpenSSL 3.6 and absent on the runner's 3.0. Its properties are
+    # now checked by `test_pki.py` in the ordinary suite, on every platform,
+    # without Docker.
     generated = subprocess.run(  # noqa: S603 — fixed path inside the repository
-        ["/bin/bash", str(REFERENCE / "tls" / "generate.sh")],
+        [sys.executable, str(REFERENCE / "tls" / "generate.py")],
         capture_output=True,
         text=True,
         check=False,

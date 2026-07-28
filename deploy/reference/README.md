@@ -15,7 +15,7 @@ exists, not about what is permitted.
 
 ```bash
 cd deploy/reference
-./tls/generate.sh              # ephemeral PKI, never committed
+python tls/generate.py              # ephemeral PKI, never committed
 docker compose up --build
 docker compose down -v
 ```

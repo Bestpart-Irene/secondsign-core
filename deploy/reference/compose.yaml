@@ -27,7 +27,7 @@
 name: secondsign-reference
 
 services:
-  # NOTE: run `./tls/generate.sh` before `docker compose up`. The PKI is
+  # NOTE: run `python tls/generate.py` before `docker compose up`. The PKI is
   # generated on the host rather than by a service here, and that is a
   # correction rather than the original design.
   #
