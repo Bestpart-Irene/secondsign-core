@@ -1,43 +1,71 @@
 # Contributing to SecondSign Core
 
-## Your first contribution, in six commands
+## Your first contribution
 
-The rest of this file is the full protocol. This is the part that trips people
-up, and it is short:
+**Check your Git identity first.** Every commit here carries a sign-off naming
+you, and CI rejects a template placeholder — so read what is set *before* you
+commit. Afterwards the fix is a rebase over the whole branch, which is the step
+that turns a five-minute contribution into an afternoon.
 
 ```bash
-# 1. Identity — every commit here is signed off, and the sign-off must name you.
-#    CI checks it: your real name and an address that could reach you.
-#    A placeholder or an example.com address is rejected.
-git config user.name  "Your Name"
-git config user.email "you@example.com"   # ← your real address, not this one
+git config --get user.name
+git config --get user.email
+```
 
-# 2. Branch. The prefix matters: CI reads it.
+If either is empty, or is a template's suggestion rather than you, set it. The
+address has to be one that could reach you:
+
+```bash
+git config user.name  "Ada Lovelace"
+git config user.email <the address on your GitHub account>
+```
+
+If you would rather not publish your own address, GitHub issues you one:
+**Settings → Emails → "Keep my email addresses private"** gives you an
+`ID+USERNAME@users.noreply.github.com`. It attributes the commit to you, keeps
+your address out of a public log, and passes this gate.
+
+Then:
+
+```bash
+# 1. Branch. The prefix matters: CI reads it.
 #    docs/… or chore/… for documentation and housekeeping — no slice needed.
-#    fix/<SLICE-ID>/… or feat/<SLICE-ID>/… when you touch src/ — needs a slice
-#    manifest as the first commit; the issue you picked up names the id.
+#    fix/<SLICE-ID>/… or feat/<SLICE-ID>/… when you touch src/ — the issue you
+#    picked up names the id, and its manifest is already on main. See below.
 git checkout -b docs/your-change
 
-# 3. Install, including the dev toolchain the gates use.
+# 2. Install, including the dev toolchain the gates use.
 pip install -e ".[dev]"
 
-# 4. Commit with -s. Without it CI fails, and the fix is a rebase.
+# 3. Commit with -s. Without it CI fails, and the fix is a rebase.
 git commit -s -m "docs: what you changed"
 
-# 5. Run the gates before you push. They are the same ones CI runs.
+# 4. Ask, locally, everything CI is going to say about the protocol.
+python tools/contributor_check.py
+
+# 5. Run the gates. They are the same ones CI runs.
 ruff check . && ruff format --check . && mypy src && pytest && lint-imports
 
 # 6. Push and open a pull request.
 git push -u origin HEAD
 ```
 
-**If CI fails on the sign-off**, nothing is broken — it is fixable in one
-command, and the failure message prints it:
+Step 4 is the one worth not skipping. `tools/contributor_check.py` runs the
+repository's own gates — sign-off, branch name, declared scope, the derived
+status table — against your branch and prints the command that fixes each
+failure. Every one of those is a one-command fix, and every one of them used to
+be discovered on a runner, minutes after a push, in a log you had to go and
+find. That was a defect in this project, not in anyone's contribution.
 
-```bash
-git rebase origin/main --exec 'git commit --amend --no-edit -s'
-git push --force-with-lease
-```
+**There are two pull request templates.** The default is short — what changed,
+tests, authorship, risks — and it is the right one for documentation, examples,
+assets, tooling and a contained bug fix. A change on the decision path (`src/`,
+`client/src/`, `onchain/`) uses the longer one, which asks for threats, declared
+scope and the invariants you reasoned about; open it by adding
+`?template=core-slice.md` to the compare URL. Asking a documentation fix to
+account for eight security invariants taught people to tick boxes without
+reading them, which is exactly how those boxes stop meaning anything on the pull
+requests where they matter.
 
 You do not need to add yourself to [`CONTRIBUTORS.md`](CONTRIBUTORS.md). It is
 generated from the Git history after your change merges.
@@ -47,6 +75,45 @@ issue`](https://github.com/Bestpart-Irene/secondsign-core/labels/good%20first%20
 each carry their scope, acceptance criteria, the commands to run, and the branch
 name to use. If any step here is unclear, say so in the issue — the protocol
 being unclear is a defect in this file.
+
+## What a maintainer does, so you do not have to
+
+A contributor's job here is the change: the failing test, the implementation,
+the sign-off. Several other things have to happen for a change to land, and none
+of them is a good use of a first contribution. They are maintainer work, and
+they are done for you.
+
+**The slice manifest is already on `main`.** A change under `src/` belongs to a
+slice, which declares its scope, its threat coverage and its acceptance criteria
+before any code exists. That is a governance decision —
+[`GOVERNANCE.md`](GOVERNANCE.md) reserves roadmap acceptance to maintainers — so
+for anything labelled `good first issue` the manifest is written and merged
+before the issue is filed. You will not be asked to author one, to keep the
+generated [`docs/slices/STATUS.md`](docs/slices/STATUS.md) in step, or to rewrite
+your first commit when the scope turns out to need widening. The issue tells you
+which files you may change; that is the whole of it.
+
+For something *not* on the roadmap, open an issue first and let the boundary be
+agreed there. A manifest arriving inside an implementation pull request is a
+scope decision and an implementation asking for one review, and it cannot
+honestly be given.
+
+**"This branch is out of date" is not yours to fix.** `main` requires branches to
+be up to date before merging, so every merge to trunk leaves every open pull
+request behind. A maintainer presses **Update branch**. You are welcome to merge
+`main` yourself if you want the gates run against trunk as it stands, but nobody
+will ask you to rebase on someone else's schedule.
+
+**Mechanical fixes may be pushed to your branch**, if you left "Allow edits by
+maintainers" on — formatting, a scope manifest, a regenerated status table,
+syncing with `main`. What will never be changed for you is the logic, the
+security semantics, or your sign-off: those are the parts the review is actually
+about, and they are yours.
+
+**Review comes in one pass.** Everything that blocks a merge is listed at once
+and marked as blocking; anything else is marked `optional` and you may decline
+it. Discovering one more problem per round is a review style, not a standard,
+and it is not this project's.
 
 ## Developer Certificate of Origin (required)
 
@@ -126,11 +193,15 @@ All work lands as a **slice**: one branch, one review, one reviewable change
 with declared scope. This is what lets contributors — human or agent — extend
 the project without a maintainer explaining the design each time.
 
-1. **Pick or propose a slice.** Existing queue:
-   [`docs/slices/roadmap.yaml`](docs/slices/roadmap.yaml). For something new,
-   copy [`docs/slices/TEMPLATE.yaml`](docs/slices/TEMPLATE.yaml) and open it as
-   the first commit of your branch, so scope is agreed before code exists.
-   Validate it: `python tools/validate_slice.py path/to/slice.yaml`
+1. **Pick a slice.** The queue is
+   [`docs/slices/roadmap.yaml`](docs/slices/roadmap.yaml), and for anything
+   labelled `good first issue` the manifest is already merged — see "What a
+   maintainer does, so you do not have to" above. To *propose* something new,
+   open an issue; a maintainer agrees the boundary and lands the manifest, and
+   the issue is then marked ready to implement. If you are a maintainer writing
+   one, copy [`docs/slices/TEMPLATE.yaml`](docs/slices/TEMPLATE.yaml), land it on
+   `main` first, and validate it with
+   `python tools/validate_slice.py path/to/slice.yaml`.
 2. **Write the failing test first**, and confirm it actually fails. A test that
    passes before the implementation exists is testing nothing.
 3. **Implement minimally.** Stay inside the declared `scope`. A change outside
@@ -156,6 +227,12 @@ python tools/validate_slice.py docs/slices/roadmap.yaml
 python tools/check_slice_scope.py
 python tools/render_roadmap.py --check
 ```
+
+The last three, plus the sign-off check and a comparison against `main`, are
+what `python tools/contributor_check.py` runs in one pass — the same scripts,
+invoked rather than reimplemented, with the fix command printed beside each
+failure. It deliberately does not wrap `ruff`, `mypy` or `pytest`: those explain
+themselves, and a wrapper would only put a layer between you and a clear message.
 
 Two of these are worth knowing about before they fail on you:
 

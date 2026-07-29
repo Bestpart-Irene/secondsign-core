@@ -49,6 +49,45 @@ Six things stop for a maintainer. Everything else proceeds on green CI.
 Ordinary implementation, test-failure fixes, documentation, lint, and internal
 refactoring are explicitly *not* checkpoints.
 
+## What maintainers carry, so contributors do not
+
+Checkpoint 1 above — accepting a slice into the roadmap — is a maintainer
+decision. It used to be handed to contributors anyway: an issue would describe a
+change under `src/`, and whoever picked it up had to author the manifest that
+declared its scope and acceptance criteria, keep the derived status table in
+step, and rewrite their first commit if the scope later moved. That is this
+project's governance work arriving inside somebody's first pull request, and it
+is a decision they were not empowered to make.
+
+So:
+
+- **A slice manifest for anything labelled `good first issue` is merged to
+  `main` before the issue is filed.** The issue names the files the contributor
+  may change. Nobody is asked to author, validate or regenerate anything derived
+  from the roadmap.
+- **An unplanned proposal starts as an issue.** A maintainer agrees the
+  boundary, lands the manifest, and marks the issue ready to implement. A
+  manifest inside an implementation pull request asks one review to settle a
+  scope decision and an implementation at once, and it cannot honestly do both.
+- **Keeping a branch current with `main` is maintainer work.** `main` is strict,
+  so every merge to trunk leaves every open pull request behind; a maintainer
+  presses "Update branch" rather than asking contributors to rebase on trunk's
+  schedule.
+- **Mechanical corrections may be pushed to a contributor's branch** where they
+  have allowed maintainer edits: formatting, a scope manifest, a regenerated
+  status table, a sync with `main`. **Logic, security semantics, and a
+  contributor's own sign-off are never edited for them** — those are what the
+  review is about, and changing them would put a maintainer's work under someone
+  else's certification.
+- **Blocking review comes in one pass.** Everything that prevents a merge is
+  raised together and marked blocking; the rest is marked `optional` and may be
+  declined. Serial discovery is a review habit, not a standard, and it spends a
+  contributor's time to save a reviewer's.
+
+None of this loosens a gate. Sign-off, independent authorship, declared scope,
+the tests, and branch protection are unchanged — what moved is who does the
+clerical work of satisfying them.
+
 ## Decisions
 
 Durable architectural and policy decisions are recorded as ADRs in
