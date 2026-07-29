@@ -1,0 +1,39 @@
+[project]
+name = "secondsign-client"
+dynamic = ["version"]                 # read from src/secondsign_client/__init__.py
+description = "The agent-side client for SecondSign — carries a proposal to the gateway and reads the answer. Holds no credential, no rail adapter, no policy."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11"
+authors = [{ name = "SecondSign contributors" }]
+keywords = ["ai-agents", "agent-security", "authorization", "fintech", "payments"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Typing :: Typed",
+]
+# The whole dependency list, and a test reads it back out of the built wheel
+# (ADR 0003 §1). If the client ever needs a fact the published outcome does not
+# carry, that is a core change with a threat analysis — not a new entry here.
+dependencies = ["pydantic>=2"]
+
+[project.urls]
+Homepage = "https://secondsignruntime.com"
+Repository = "https://github.com/Bestpart-Irene/secondsign-core"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/secondsign_client/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/secondsign_client"]

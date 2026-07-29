@@ -404,12 +404,42 @@ class TestABodySuppliedPrincipalIsRefused:
         assert payload == {"refused": "body_supplied_principal"}
 
     def test_a_body_without_a_principal_gets_no_verdict(self, loopback_gateway) -> None:
-        """Until the wire contract lands, the gateway declares itself unable to
+        """Until authorization is wired, the gateway declares itself unable to
         authorize — a refusal, never a locally invented verdict."""
-        status, payload = _post(loopback_gateway, json.dumps({"anything": 1}).encode())
+        status, payload = _post(loopback_gateway, json.dumps({"wire_version": 1}).encode())
 
         assert status == 503
         assert payload == {"refused": "authorization_unavailable"}
+
+    def test_a_principal_nested_in_the_request_is_refused(self, loopback_gateway) -> None:
+        """The wire envelope wraps the request one level down; a smuggled
+        principal there is the same claim in a different pocket."""
+        body = json.dumps(
+            {"wire_version": 1, "request": {"principal": "spiffe://impersonated"}}
+        ).encode()
+
+        status, payload = _post(loopback_gateway, body)
+
+        assert status == 400
+        assert payload == {"refused": "body_supplied_principal"}
+
+    @pytest.mark.parametrize("version", [99, "1", None])
+    def test_an_unrecognised_wire_version_is_refused_not_parsed(
+        self, loopback_gateway, version
+    ) -> None:
+        """ADR 0003 §3: a client announcing a version the gateway does not
+        recognise is refused rather than best-effort parsed — a peer speaking a
+        different dialect may mean something different by every word in it.
+        The string "1" is not the integer 1: type coercion is best-effort
+        parsing wearing a smaller costume."""
+        body: dict = {"anything": 1}
+        if version is not None:
+            body["wire_version"] = version
+
+        status, payload = _post(loopback_gateway, json.dumps(body).encode())
+
+        assert status == 400
+        assert payload == {"refused": "wire_version_unrecognised"}
 
     def test_malformed_json_is_refused(self, loopback_gateway) -> None:
         status, payload = _post(loopback_gateway, b"{not json")

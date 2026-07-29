@@ -39,22 +39,28 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      # Both distributions: core, and the agent-side client that must not
+      # depend on it (CORE-S019 / ADR 0003). Installed editable so the suite
+      # imports what the repository holds, while `tests/client/` asserts the
+      # built wheel's metadata separately.
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]" && pip install -e client/
 
       - name: Lint
         run: ruff check .
       - name: Format
         run: ruff format --check .
       - name: Types
-        run: mypy src
+        run: mypy src client/src
 
       # README states branch coverage is 100%. A claim about this repository that
       # only a convention keeps true is the kind of drift this project cannot
       # afford, so the gate is set where the claim is rather than below it.
       # Coverage is an execution measure, not evidence the assertions are right —
       # it belongs here as a ratchet, and nowhere as a security argument.
+      # The client package is under the same ratchet: a refusal path in the
+      # transport that no test reaches is a refusal nobody has proven happens.
       - name: Tests (unit, properties, contracts, conformance, architecture)
-        run: pytest --cov=secondsign --cov-report=term-missing --cov-fail-under=100
+        run: pytest --cov=secondsign --cov=secondsign_client --cov-report=term-missing --cov-fail-under=100
 
       - name: Import and architecture boundaries
         run: lint-imports

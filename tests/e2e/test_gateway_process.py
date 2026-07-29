@@ -185,12 +185,28 @@ class TestAnAuthenticatedWorkload:
 
     def test_gets_no_verdict_while_authorization_is_unwired(self, gateway, pki) -> None:
         response, body = _request(
-            gateway, _client_context(pki), method="POST", path="/authorize", body=b"{}"
+            gateway,
+            _client_context(pki),
+            method="POST",
+            path="/authorize",
+            body=b'{"wire_version": 1}',
         )
 
         payload = json.loads(body)
         assert response.status == 503
         assert payload == {"refused": "authorization_unavailable"}
+
+    def test_speaking_an_unknown_dialect_gets_refused_not_guessed_at(self, gateway, pki) -> None:
+        response, body = _request(
+            gateway,
+            _client_context(pki),
+            method="POST",
+            path="/authorize",
+            body=b'{"wire_version": 2}',
+        )
+
+        assert response.status == 400
+        assert json.loads(body) == {"refused": "wire_version_unrecognised"}
 
     def test_an_unknown_path_is_refused(self, gateway, pki) -> None:
         response, body = _request(gateway, _client_context(pki), path="/admin")

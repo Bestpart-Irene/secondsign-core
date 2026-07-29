@@ -74,6 +74,13 @@ MAX_AUTHORIZE_BODY_BYTES: Final[int] = 1_048_576
 #: never ignored (ADR 0004 §1).
 _PRINCIPAL_FIELDS: Final[tuple[str, ...]] = ("client_principal", "principal")
 
+#: Wire dialects this gateway speaks. Declared here and again in
+#: `secondsign_client.wire.WIRE_VERSION` — neither side may import the other,
+#: so the core repository's `tests/client/test_wire_contract.py` holds the two
+#: declarations equal. A request announcing anything else is refused rather
+#: than best-effort parsed (ADR 0003 §3).
+SUPPORTED_WIRE_VERSIONS: Final[frozenset[int]] = frozenset({1})
+
 #: Every setting this process reads. Anything else under the prefix is a refusal
 #: to start. The rail entries are consumed by the rail executor when a later step
 #: of CORE-S019 wires it; they are named here so the reference deployment's
@@ -435,16 +442,37 @@ class _RequestHandler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             self._respond(400, {"refused": "malformed_body"})
             return
-        if any(field in payload for field in _PRINCIPAL_FIELDS):
+        if self._carries_a_principal(payload):
             # Refused, never ignored: an accepted-and-ignored field is one a
-            # later change can quietly start honouring (ADR 0004 §1).
+            # later change can quietly start honouring (ADR 0004 §1). Checked
+            # before the dialect, because a smuggled identity is refused as
+            # what it is regardless of the version the body claims to speak.
             self._respond(400, {"refused": "body_supplied_principal"})
             return
 
-        # The wire contract is a later step of CORE-S019. Until it lands, the
-        # gateway declares itself unable to authorize — a refusal, stated as
-        # unavailability, and never a locally invented verdict.
+        version = payload.get("wire_version")
+        if isinstance(version, bool) or version not in SUPPORTED_WIRE_VERSIONS:
+            # Refused rather than best-effort parsed (ADR 0003 §3). The bool
+            # guard is not pedantry: True == 1 in Python, and a peer announcing
+            # `true` is not announcing version one — it is announcing that its
+            # serializer and this parser disagree about what a version is.
+            self._respond(400, {"refused": "wire_version_unrecognised"})
+            return
+
+        # The dialect is right; the engine behind it is a later step of
+        # CORE-S019. The gateway declares itself unable to authorize — a
+        # refusal, stated as unavailability, and never a locally invented
+        # verdict.
         self._respond(503, {"refused": "authorization_unavailable"})
+
+    @staticmethod
+    def _carries_a_principal(payload: dict[str, object]) -> bool:
+        """A principal at the top level, or one level down in the wire
+        envelope's ``request`` — the same claim in a different pocket."""
+        if any(field in payload for field in _PRINCIPAL_FIELDS):
+            return True
+        request = payload.get("request")
+        return isinstance(request, dict) and any(field in request for field in _PRINCIPAL_FIELDS)
 
 
 class GatewayServer:
