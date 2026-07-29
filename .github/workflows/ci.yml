@@ -74,7 +74,18 @@ jobs:
       # form of this check. This step is also where freshness against the real
       # repository is asserted; the test suite deliberately does not, so that it
       # keeps passing on a shallow clone.
+      #
+      # Pull requests only, and that is not a loophole. What this check defends
+      # against is someone maintaining STATUS.md by hand, which can only happen
+      # on a branch. On a push to `main` it asks a question the commit under test
+      # cannot answer: a slice is complete once trunk holds the merge of its
+      # branch, so the merge that completes a slice is guaranteed to arrive with
+      # a stale file, every time, through no one's fault. Failing there reports
+      # the project succeeding, and a check that cries wolf on success is how a
+      # red `main` stops meaning anything. `.github/workflows/derived.yml`
+      # regenerates the file after the merge instead.
       - name: Roadmap status table is not stale
+        if: github.event_name == 'pull_request'
         run: |
           git fetch --no-tags --depth=200 origin main:refs/remotes/origin/main
           python tools/render_roadmap.py --check
