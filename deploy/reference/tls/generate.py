@@ -98,6 +98,13 @@ def build_ca(now: dt.datetime) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
         .not_valid_before(now - dt.timedelta(minutes=1))
         .not_valid_after(now + dt.timedelta(days=1))
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        # RFC 5280 requires key identifiers, and verifiers increasingly agree:
+        # Python 3.13's default client context verifies with X509_STRICT, which
+        # rejects a chain whose issuer cannot be located by identifier. Without
+        # these, the PKI works against a lenient verifier and fails against a
+        # strict one — a disagreement between machines about a security
+        # property, which is this generator's origin story.
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
         .add_extension(
             x509.KeyUsage(
                 digital_signature=False,
@@ -142,6 +149,13 @@ def build_leaf(
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(san, critical=False)
         .add_extension(eku, critical=False)
+        # Key identifiers, as on the CA: a strict verifier locates the issuer
+        # by these rather than by name alone.
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
+            critical=False,
+        )
         .sign(ca_key, hashes.SHA256())
     )
     return key, cert

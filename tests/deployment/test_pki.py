@@ -153,6 +153,35 @@ class TestTheCertificateAuthority:
             assert constraints.ca is False, f"the {name} certificate is a CA"
 
 
+class TestAStrictVerifierCanWalkTheChain:
+    """RFC 5280 key identifiers, present on every certificate.
+
+    Python 3.13's default client context verifies with X509_STRICT, which
+    locates an issuer by key identifier rather than by name alone. Without
+    these extensions the PKI verifies on a lenient machine and fails on a
+    strict one — tooling silently disagreeing across machines about a security
+    property, which is this generator's origin story (see the module
+    docstring). Found the practical way: `secondsign-client`, which verifies
+    with the default context and has no knob to relax it, could not complete a
+    handshake against the reference gateway.
+    """
+
+    def test_the_ca_names_its_own_key(self, issued) -> None:
+        issued["ca"].extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+
+    @pytest.mark.parametrize("leaf", ["gateway", "client"])
+    def test_each_leaf_names_itself_and_its_issuer(self, issued, leaf) -> None:
+        ski = issued[leaf].extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+        aki = issued[leaf].extensions.get_extension_for_class(x509.AuthorityKeyIdentifier).value
+        ca_ski = issued["ca"].extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+
+        assert aki.key_identifier == ca_ski.digest, (
+            f"the {leaf} leaf's authority key identifier does not name the CA that "
+            "signed it; a strict verifier cannot walk this chain"
+        )
+        assert ski.digest != ca_ski.digest
+
+
 class TestCustodyLayout:
     """ADR 0004 §3. Which directory a file lands in decides which container
     can read it, so the layout is a security property rather than tidiness."""
