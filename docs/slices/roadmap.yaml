@@ -318,6 +318,7 @@ slices:
       - tests/redteam/**
       - tests/architecture/**
       - tests/client/**
+      - tests/conformance/**
       - tests/deployment/**
       - tests/e2e/**
       - docs/**
