@@ -1,4 +1,9 @@
 <!--
+The template for a change on the decision path — anything under `src/`,
+`client/src/` or `onchain/`. Documentation, examples, assets, tooling and
+contained bug fixes use the shorter default template instead; GitHub opens this
+one only when the URL carries `?template=core-slice.md`.
+
 One slice, one branch, one pull request. If this PR does more than one slice,
 split it — the review below cannot be given honestly for two changes at once.
 -->
