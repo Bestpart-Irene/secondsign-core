@@ -215,19 +215,34 @@ class TestAnAuthenticatedWorkload:
         assert json.loads(body) == {"refused": "unknown_path"}
 
 
+#: The three spellings of one fact: the handshake yielded no service.
+#:
+#: Under TLS 1.3 the server learns about the missing or untrusted certificate
+#: only after its own Finished flight, so it sends an alert and closes while the
+#: caller is still mid-exchange. Which error the caller sees is a race it does
+#: not get to pick: it reads the alert (`SSLError`), reads the close
+#: (`ConnectionResetError`), or loses even that and finds its own write hitting a
+#: closed socket (`BrokenPipeError`). CI's Linux runners reliably produce the
+#: second; macOS produces the first usually and the third about once in
+#: twenty-five runs.
+#:
+#: Named types, never `OSError`. The broad catch would also swallow
+#: `ConnectionRefusedError` — nothing listening at all — and this suite would
+#: then report "the gateway refused an anonymous caller" on a machine where the
+#: gateway never started.
+NO_SERVICE = (ssl.SSLError, ConnectionResetError, BrokenPipeError)
+
+
 class TestAnUnauthenticatedCaller:
-    """How the refusal surfaces client-side is a race the caller does not get
-    to pick. Under TLS 1.3 the server learns about the missing or untrusted
-    certificate after its own Finished flight, sends an alert, and closes; the
-    caller reads either the alert (`SSLError`) or the close (`ConnectionResetError`)
-    depending on timing — CI's Linux runners reliably produce the second, macOS
-    the first. Both spellings are the same fact: the handshake yielded no
-    service, and no HTTP request was ever read."""
+    """No client certificate, or one from a stranger CA, and the connection
+    yields nothing: no HTTP request is ever read, so there is no request for a
+    handler to refuse. See `NO_SERVICE` for why three exception types are the
+    same result."""
 
     def test_no_client_certificate_no_service(self, gateway, pki) -> None:
         """CERT_REQUIRED means the handshake itself fails; there is no
         anonymous request for a handler to even refuse."""
-        with pytest.raises((ssl.SSLError, ConnectionResetError)):
+        with pytest.raises(NO_SERVICE):
             _request(gateway, _client_context(pki, cert=None))
 
     def test_a_certificate_from_a_stranger_ca_is_refused(self, gateway, pki, tmp_path_factory):
@@ -241,7 +256,7 @@ class TestAnUnauthenticatedCaller:
             str(foreign_root / "agent" / "client-key.pem"),
         )
 
-        with pytest.raises((ssl.SSLError, ConnectionResetError)):
+        with pytest.raises(NO_SERVICE):
             _request(gateway, context)
 
     def test_plaintext_to_the_tls_port_gets_nothing(self, gateway) -> None:
