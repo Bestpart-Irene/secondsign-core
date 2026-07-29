@@ -349,7 +349,15 @@ slices:
     title: Explain malformed Fingerprint values without exposing identifiers
     depends_on: [CORE-S005]
     threats: [A5]
-    scope: ["src/secondsign/contracts/**", "tests/contracts/**"]
+    # `tests/intent/**` is in scope because the guarantee is carried by the
+    # `Fingerprint` type rather than by any one model that uses it. A test that
+    # only reaches it through `secondsign.contracts` would pass while every
+    # other holder of a fingerprint leaked the value, which is the failure this
+    # slice exists to prevent — so the slice has to be allowed to assert on a
+    # second holder. Widened during review of pull request #44, deliberately,
+    # rather than by moving the test somewhere it means less.
+    scope:
+      ["src/secondsign/contracts/**", "tests/contracts/**", "tests/intent/**"]
     forbidden:
       - raw identifier values in validation errors
       - changes to the accepted or rejected Fingerprint value set
