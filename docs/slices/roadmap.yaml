@@ -317,10 +317,13 @@ slices:
       - deploy/**
       - tests/redteam/**
       - tests/architecture/**
+      - tests/audit/**
       - tests/client/**
       - tests/conformance/**
       - tests/deployment/**
       - tests/e2e/**
+      - tests/gateway/**
+      - tests/rails/**
       - docs/**
       - tools/**
       - tests/tooling/**
