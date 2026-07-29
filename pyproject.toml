@@ -52,6 +52,13 @@ dev = [
     "mypy==2.3.0",
     "pyyaml==6.0.3",
     "stripe==15.3.1",
+    # `tests/packaging/test_sdist.py` builds a real source distribution rather
+    # than reading the include list, because the list is not the artefact. Both
+    # are dev dependencies so the build runs with `--no-isolation`: a test that
+    # reaches the network to fetch its own backend fails for reasons that have
+    # nothing to do with what it asserts.
+    "build==1.5.0",
+    "hatchling==1.31.0",
 ]
 
 [build-system]
@@ -71,6 +78,14 @@ packages = ["src/secondsign"]
 include = [
     "src/secondsign",
     "tests",
+    # Listed explicitly because the entries here are gitignore-style patterns:
+    # the bare "README.md" below is depth-agnostic and already matched the
+    # example's README, so omitting this line shipped a document describing two
+    # files that were not in the artefact. `tests/packaging/test_sdist.py`
+    # asserts the modules ship, because a `testpaths` entry that matches nothing
+    # is skipped in silence — the certification would simply not exist inside
+    # the published source distribution, and nothing would say so.
+    "examples",
     "docs",
     "tools",
     "README.md",
