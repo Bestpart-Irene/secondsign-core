@@ -49,8 +49,8 @@ The entire integration is one subclass (in
 [`test_conformance.py`](test_conformance.py)):
 
 ```python
+from examples.policy_plugin.counterparty_allowlist import CounterpartyAllowlistPolicy
 from secondsign.conformance import PolicyPluginConformance
-from counterparty_allowlist import CounterpartyAllowlistPolicy
 
 
 class TestCounterpartyAllowlistConformance(PolicyPluginConformance):

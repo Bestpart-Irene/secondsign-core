@@ -17,8 +17,7 @@ directly.
 
 from datetime import datetime, timedelta, timezone
 
-from counterparty_allowlist import CounterpartyAllowlistPolicy
-
+from examples.policy_plugin.counterparty_allowlist import CounterpartyAllowlistPolicy
 from secondsign.conformance import PolicyPluginConformance
 from secondsign.contracts import (
     ActionClass,
