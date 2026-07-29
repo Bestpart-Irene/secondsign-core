@@ -101,6 +101,41 @@ escalation. Availability is your responsibility: a plugin that reaches an
 external service must have its own timeout and its own answer for that service
 being down.
 
+## How to certify an agent-side client
+
+An extension attaches *inside* the control plane. A client sits outside it and
+speaks to the gateway over the wire, so what has to be certified is the
+protocol, not a Python object:
+
+```python
+from secondsign.conformance import WireClientConformance
+
+
+class TestMyClient(WireClientConformance):
+    def attempt(self, host, port, request):
+        client = MyClient(host=host, port=port)
+        return client.authorize(**request).status
+```
+
+Three arguments in, one status string out — `completed`, `refused` or
+`awaiting_review`. Nothing about your client's API is prescribed. The kit stands
+up its own probe gateway on loopback, records the bytes you actually sent, and
+scripts the answers a real gateway cannot be asked to give.
+
+| Check | Why |
+|---|---|
+| It asks before it answers | A verdict reached locally is a verdict the control plane never made |
+| The envelope is the version and the proposal, and nothing else | A field the gateway does not define is either ignored — which teaches you it was honoured — or refused |
+| The version is an integer this contract defines | `"1"` is not `1` and `true` is not version one; coercing the field that says how to parse everything else is best-effort parsing at the worst place |
+| The proposal validates against the agent surface, unaltered | Closed enums, integer minor units and opaque fingerprints, so a raw account identifier is unrepresentable (A5) — and the value you proposed is the value decided on |
+| It carries no principal, in either pocket | Identity is derived from the authenticated peer; a principal in the body is refused, never ignored |
+| An unrecognised dialect, an unparseable answer, an unknown status, a decline, or nothing listening all read as `refused` | INV-1 — an agent that can tell "no" from "we could not tell" retries against the second one |
+| The gateway's answer is relayed unchanged | Refusing everything is as much an invented verdict as completing everything |
+
+Availability is not something a client may soften. With the gateway down,
+authorization is *impossible*, and the honest place to surface that is operator
+health signals.
+
 ## Available and forthcoming
 
 | Extension point | Suite | Status |
@@ -109,6 +144,7 @@ being down.
 | Rail adapter | `RailAdapterConformance` | Available |
 | Approval provider | `ApprovalProviderConformance` | Available |
 | Audit sink | `AuditSinkConformance` | Available |
+| Agent-side wire client | `WireClientConformance` | Available |
 | Compliance provider | `ComplianceProviderConformance` | Forthcoming |
 
 Forthcoming suites are not stubbed. Shipping an empty conformance class would

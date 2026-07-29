@@ -24,6 +24,7 @@ from secondsign_client import wire
 
 from secondsign import contracts as core_contracts
 from secondsign.agent import surface as core_agent
+from secondsign.agent import wire as core_wire
 from secondsign.gateway.server import SUPPORTED_WIRE_VERSIONS
 
 FINGERPRINT = "fp:" + "ab" * 32
@@ -90,6 +91,14 @@ class TestTheVersionIsItsOwn:
         the other — so this repository, the one place both are visible, holds
         the declarations equal."""
         assert wire.WIRE_VERSION in SUPPORTED_WIRE_VERSIONS
+
+    def test_the_two_declarations_are_the_same_integer(self) -> None:
+        """Core states the version once, on the boundary it belongs to; the
+        client states it again because it cannot import core. Two declarations,
+        held equal here — and exactly two, since the gateway and the conformance
+        kit both read core's rather than restating it."""
+        assert core_wire.WIRE_VERSION == wire.WIRE_VERSION
+        assert core_wire.SUPPORTED_WIRE_VERSIONS is SUPPORTED_WIRE_VERSIONS
 
     def test_independence_from_the_plugin_contract_is_structural(self) -> None:
         """`WIRE_VERSION` cannot be derived from `CONTRACT_VERSION`, because no

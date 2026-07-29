@@ -61,6 +61,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 
+from secondsign.agent.wire import PRINCIPAL_FIELDS, SUPPORTED_WIRE_VERSIONS
+
 #: ADR 0004 §4: client leaf validity is capped at 24 hours, enforced rather than
 #: recommended. With no CRL and no OCSP, this number is the entire revocation
 #: story — a leaked certificate stays valid until it expires.
@@ -70,16 +72,13 @@ MAX_CLIENT_LEAF_SECONDS: Final[int] = 24 * 3600
 #: single byte of it is read.
 MAX_AUTHORIZE_BODY_BYTES: Final[int] = 1_048_576
 
-#: Field names whose presence in a request body is a smuggled identity. Refused,
-#: never ignored (ADR 0004 §1).
-_PRINCIPAL_FIELDS: Final[tuple[str, ...]] = ("client_principal", "principal")
-
-#: Wire dialects this gateway speaks. Declared here and again in
-#: `secondsign_client.wire.WIRE_VERSION` — neither side may import the other,
-#: so the core repository's `tests/client/test_wire_contract.py` holds the two
-#: declarations equal. A request announcing anything else is refused rather
-#: than best-effort parsed (ADR 0003 §3).
-SUPPORTED_WIRE_VERSIONS: Final[frozenset[int]] = frozenset({1})
+#: Field names whose presence in a request body is a smuggled identity, and the
+#: wire dialects this gateway speaks — both re-exported from the boundary's own
+#: declaration rather than restated here. The agent-side distribution states the
+#: version again in `secondsign_client.wire.WIRE_VERSION` because neither package
+#: may import the other, and `tests/client/test_wire_contract.py` holds those two
+#: equal; a third copy inside core would be drift with nothing to buy.
+_PRINCIPAL_FIELDS: Final[tuple[str, ...]] = PRINCIPAL_FIELDS
 
 #: Every setting this process reads. Anything else under the prefix is a refusal
 #: to start. The rail entries are consumed by the rail executor when a later step

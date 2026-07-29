@@ -51,6 +51,15 @@ core repository and asserted by its adversarial suite.
   is bounded by the intent's validity window and the gateway's idempotency
   reservation; the transport adds no replay mechanism of its own (ADR 0003 §4).
 
+## Writing your own client instead
+
+Nothing here is privileged. The wire contract is the contract, and
+`WireClientConformance` in `secondsign-core` certifies any client against it —
+this one included, through the same three-line adapter a third party writes. See
+[EXTENSION_CONTRACTS.md](https://github.com/Bestpart-Irene/secondsign-core/blob/main/docs/EXTENSION_CONTRACTS.md).
+The kit is a development-time dependency of *your test suite*; nothing it needs
+enters the environment your agent runs in.
+
 ## Licence
 
 Apache-2.0. Part of the SecondSign project; developed in the
