@@ -132,6 +132,25 @@ jobs:
       - name: No-bypass, from inside the agent container
         run: pytest -m deployment -q
 
+      # A gate that cannot fail is not a gate — the same argument the Solidity
+      # job's mutation step makes, applied to a gate whose subject is a network.
+      #
+      # The step above asserts a negative: hostile code in the agent container
+      # cannot reach the rail. Negatives pass for boring reasons — nothing
+      # listening, a container that never started, a name that does not resolve,
+      # a harness that stopped probing. `TestTheSuiteIsNotVacuous` rules out the
+      # first, but it is an assertion inside the suite being questioned: it can
+      # say the addresses were reachable, not that the suite would have noticed a
+      # reachable *rail*, because a correct deployment never has one.
+      #
+      # So this stands up the same deployment with one line added — `railnet` on
+      # the agent — and re-runs the real isolation cases, unmodified, requiring
+      # them to fail. It runs after the gate rather than before it, and separates
+      # them, because a mutation is not a gate: it is the evidence that the gate
+      # is one.
+      - name: The gate can fail — the same suite against a joined topology
+        run: pytest -m deployment_mutation -q
+
   # The Solidity gates a slice declares as `forge_fmt` and `forge_test`.
   #
   # Foundry is pinned by version and checksum rather than taken from an action

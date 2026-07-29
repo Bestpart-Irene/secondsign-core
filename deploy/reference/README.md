@@ -58,6 +58,32 @@ what the gateway dispatched. This is the only check that can catch a bypass that
 *worked*: asking the agent whether its attempt failed has a blind spot exactly
 where it matters.
 
+## Why you should believe the demonstration
+
+Everything above is a **negative**, and negatives pass for boring reasons.
+Nothing was listening. A container never started. A name did not resolve. The
+harness stopped probing. Each of those produces the same green as a correctly
+isolated deployment, which is why two things run alongside the suite.
+
+`TestTheSuiteIsNotVacuous` requires the gateway to be reachable *from the same
+container the attacks fail from*, and the rail to be reachable from the gateway.
+Without it, "nothing was up" would read as "the rail was unreachable".
+
+That guard is still an assertion inside the suite being questioned, though: it
+can say the addresses were reachable, not that the suite would have **noticed**
+a reachable rail — because a correct deployment never has one to notice. So CI
+builds one. [`compose.joined.yaml`](compose.joined.yaml) overlays a single line
+onto this topology, `railnet` on the agent, changing nothing else: same images,
+same mounts, same credential placement, same certificates. The isolation cases
+are then re-run, unmodified, against that stack, and are **required to fail**.
+
+```bash
+docker compose -f compose.yaml -f compose.joined.yaml up -d   # do not deploy this
+pytest -m deployment_mutation -q
+```
+
+A gate that cannot be made to fail is not evidence of anything.
+
 ## What it does not demonstrate
 
 Stated plainly, because a working reference deployment reads as an endorsement
@@ -98,7 +124,15 @@ with the certificate identity model in
 
 ## Status
 
-`CORE-S019` is in progress. The topology, the mock rail and the PKI are built;
-the gateway service starts `python -m secondsign.gateway.server`, which does not
-exist yet. Until it does, the stack does not come up and the deployment suite
-reports that rather than reporting a pass.
+`CORE-S019` is in progress. The topology, the mock rail, the PKI and the gateway
+process are built: `python -m secondsign.gateway.server` terminates mTLS, derives
+the caller's identity from the certificate, and the stack comes up. The
+deployment suite and the mutation check both run in CI.
+
+What the gateway does **not** do yet is authorize. `/authorize` answers `503
+authorization_unavailable` to a perfectly authenticated caller, because the
+decision engine behind it is a later step of this slice and a refusal is the
+only honest verdict until then. One consequence is visible in the suite:
+`TestDestinationSideAccounting` compares the rail's ledger against what the
+gateway dispatched, and passes today because both are zero. It becomes evidence
+when the gateway starts dispatching.

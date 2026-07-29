@@ -1,0 +1,32 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE FALSIFIED TOPOLOGY. This is not a deployment, and nothing here should ever
+# be copied into one. It exists to be *wrong* in exactly one way:
+#
+#   agent ──agentnet── gateway ──railnet── rail
+#     └────────────────railnet─────────────┘
+#
+# One line — `railnet` on the agent — and the second term of no-bypass is gone.
+# Overlaid on `compose.yaml` with `-f compose.yaml -f compose.joined.yaml`, so
+# every other fact about the deployment stays identical: same images, same
+# mounts, same credential placement, same certificates. The only difference
+# between the topology this project ships and this one is a route.
+#
+# Why it is here: a suite of unreachability assertions passes trivially when
+# nothing is listening, when a container failed to start, when a name does not
+# resolve, or when the harness silently stopped probing. `tests/deployment/`
+# guards the first of those with `TestTheSuiteIsNotVacuous`, but that guard is
+# an assertion in the same suite — it can only say the addresses were reachable,
+# not that the suite would have *noticed* a reachable rail.
+#
+# So CI stands this up and requires the direct-to-rail cases to fail here. A
+# deployment gate that cannot be made to fail is not evidence of anything, and
+# this file is the mutation that proves it can.
+
+services:
+  agent:
+    # The whole mutation. `compose.yaml` gives the agent `agentnet` and nothing
+    # else, and calls that line the security control; this adds the network the
+    # rail is on, which is what the control exists to withhold.
+    networks: [agentnet, railnet]

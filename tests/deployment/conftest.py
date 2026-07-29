@@ -32,6 +32,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 REFERENCE = REPO_ROOT / "deploy" / "reference"
 COMPOSE_FILE = REFERENCE / "compose.yaml"
 
+#: The override that joins the agent to the rail's network. Not a deployment —
+#: the mutation `test_gate_liveness.py` requires the isolation cases to fail
+#: against.
+JOINED_OVERRIDE = REFERENCE / "compose.joined.yaml"
+
 #: Services, named once so a rename breaks in one place.
 AGENT = "agent"
 GATEWAY = "gateway"
@@ -65,11 +70,36 @@ def _run(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _compose(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
-    return _run("compose", "-f", str(COMPOSE_FILE), *args, check=check)
+@dataclass(frozen=True)
+class Topology:
+    """One Compose invocation: a project name and the files that define it.
+
+    Two exist. The reference topology is the deployment this project ships; the
+    joined one is the same deployment with a single route added, stood up under
+    its own project name so the two can never share a container, a network or a
+    ledger. Everything else about them is identical by construction, because the
+    second is the first plus one override file.
+    """
+
+    project: str
+    files: tuple[Path, ...]
+
+    def compose(self, *args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
+        flags: list[str] = []
+        for path in self.files:
+            flags += ["-f", str(path)]
+        return _run("compose", "-p", self.project, *flags, *args, check=check)
 
 
-def _wait_for_listener(service: str, port: int, seconds: float) -> None:
+#: What `deploy/reference/` documents, and what the deployment gate asserts.
+REFERENCE_TOPOLOGY = Topology("secondsign-reference", (COMPOSE_FILE,))
+
+#: The same deployment with the agent joined to the rail's network. Used only by
+#: the mutation check, which requires the isolation cases to fail against it.
+JOINED_TOPOLOGY = Topology("secondsign-reference-joined", (COMPOSE_FILE, JOINED_OVERRIDE))
+
+
+def _wait_for_listener(topology: Topology, service: str, port: int, seconds: float) -> None:
     """Give a best-effort service a bounded chance to bind its listener.
 
     Returns either way. A service that never binds leaves the cases that need it
@@ -81,14 +111,16 @@ def _wait_for_listener(service: str, port: int, seconds: float) -> None:
     deadline = time.monotonic() + seconds
     connect = f"import socket;socket.create_connection(('127.0.0.1',{port}),timeout=2)"
     while time.monotonic() < deadline:
-        if _compose("exec", "-T", service, "python", "-c", connect).returncode == 0:
+        if topology.compose("exec", "-T", service, "python", "-c", connect).returncode == 0:
             return
         time.sleep(1.0)
 
 
 @dataclass(frozen=True)
 class Stack:
-    """A running reference deployment, and the questions this suite asks of it."""
+    """A running deployment, and the questions this suite asks of it."""
+
+    topology: Topology
 
     def exec(self, service: str, *argv: str) -> subprocess.CompletedProcess[str]:
         """Run a command inside one container. Never raises on non-zero exit.
@@ -96,7 +128,7 @@ class Stack:
         A non-zero exit is frequently the assertion — an adversary failing to
         reach the rail is the expected result, not an error in the harness.
         """
-        return _compose("exec", "-T", service, *argv)
+        return self.topology.compose("exec", "-T", service, *argv)
 
     def probe(self, service: str, target: str, port: int) -> dict[str, object]:
         """Run the standard-library adversary against ``target:port``.
@@ -115,7 +147,7 @@ class Stack:
         return dict(json.loads(result.stdout))
 
     def stop(self, service: str) -> None:
-        _compose("stop", service, check=True)
+        self.topology.compose("stop", service, check=True)
 
     def start(self, service: str, *, listen_port: int = GATEWAY_LISTEN_PORT) -> None:
         """Start a stopped service and wait for it to be listening again.
@@ -125,8 +157,8 @@ class Stack:
         a case that restores the gateway hands the next case a gateway that is
         up by Docker's definition and absent by the network's.
         """
-        _compose("start", service, check=True)
-        _wait_for_listener(service, listen_port, GATEWAY_START_SECONDS)
+        self.topology.compose("start", service, check=True)
+        _wait_for_listener(self.topology, service, listen_port, GATEWAY_START_SECONDS)
 
     def rail_requests(self) -> list[dict[str, object]]:
         """What the mock rail recorded, read from the rail container itself.
@@ -144,9 +176,8 @@ class Stack:
         return value or None
 
 
-@pytest.fixture(scope="session")
-def stack() -> Stack:
-    """Bring the reference deployment up for the session, and tear it down.
+def _bring_up(topology: Topology):
+    """Stand a topology up, hand it over, and tear it down afterwards.
 
     Services come up in two groups, and the split is deliberate rather than an
     optimisation. `certs`, `rail` and `agent` are brought up and waited for: if
@@ -172,9 +203,10 @@ def stack() -> Stack:
     green. That habit is a worse outcome than the failure the guard exists to
     catch, so the race is removed rather than tolerated.
     """
-    if not COMPOSE_FILE.exists():
+    missing = [str(path.relative_to(REPO_ROOT)) for path in topology.files if not path.exists()]
+    if missing:
         pytest.fail(
-            f"no reference deployment at {COMPOSE_FILE.relative_to(REPO_ROOT)}.\n"
+            f"the {topology.project} topology is missing {missing}.\n"
             "CORE-S019 is not implemented yet; these tests are expected to fail."
         )
 
@@ -211,7 +243,7 @@ def stack() -> Stack:
             f"exit={generated.returncode}\n{generated.stdout}\n{generated.stderr}"
         )
 
-    ready = _compose("up", "-d", "--build", "--wait", RAIL, AGENT)
+    ready = topology.compose("up", "-d", "--build", "--wait", RAIL, AGENT)
     if ready.returncode != 0:
         pytest.fail(
             f"the agent and rail containers did not come up, so nothing in this "
@@ -219,10 +251,26 @@ def stack() -> Stack:
         )
 
     # Best-effort. Its absence is reported by the cases that need it.
-    _compose("up", "-d", "--build", GATEWAY)
-    _wait_for_listener(GATEWAY, GATEWAY_LISTEN_PORT, GATEWAY_START_SECONDS)
+    topology.compose("up", "-d", "--build", GATEWAY)
+    _wait_for_listener(topology, GATEWAY, GATEWAY_LISTEN_PORT, GATEWAY_START_SECONDS)
 
     try:
-        yield Stack()
+        yield Stack(topology)
     finally:
-        _compose("down", "-v", "--remove-orphans")
+        topology.compose("down", "-v", "--remove-orphans")
+
+
+@pytest.fixture(scope="session")
+def stack() -> Stack:
+    """The reference deployment: what `deploy/reference/` documents and ships."""
+    yield from _bring_up(REFERENCE_TOPOLOGY)
+
+
+@pytest.fixture(scope="session")
+def joined_stack() -> Stack:
+    """The same deployment with the agent joined to the rail's network.
+
+    Stood up only by the mutation check. It is the deployment this project tells
+    operators not to build, and its whole purpose is to be caught.
+    """
+    yield from _bring_up(JOINED_TOPOLOGY)
