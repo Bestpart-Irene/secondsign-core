@@ -145,9 +145,9 @@ class TestTheDeploymentGateHasTheSameTwoTriggers:
         )["deployment"].run
 
     def test_a_declared_gate_runs_it_with_no_deployment_file_touched_yet(self) -> None:
-        decision = gates.decide(
-            ["docs/slices/roadmap.yaml"], ["deployment_topology"], "CORE-S019"
-        )["deployment"]
+        decision = gates.decide(["docs/slices/roadmap.yaml"], ["deployment_topology"], "CORE-S019")[
+            "deployment"
+        ]
 
         assert decision.run
         assert "declares deployment_topology" in decision.reason
