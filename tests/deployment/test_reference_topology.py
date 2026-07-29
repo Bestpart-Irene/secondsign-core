@@ -30,8 +30,6 @@ which is a different statement from "nothing arrived".
 
 from __future__ import annotations
 
-import errno
-
 import pytest
 
 from tests.deployment.conftest import AGENT, GATEWAY, Stack
@@ -60,7 +58,19 @@ CLIENT_CERT_PATH = f"{MOUNT_ROOT}/client-cert.pem"
 #: EHOSTUNREACH and ENETUNREACH are unambiguous. ETIMEDOUT is included because a
 #: silently dropping network boundary is the common shape in practice; a refusal
 #: would be ECONNREFUSED, which is deliberately absent from this set.
-NO_ROUTE = {errno.EHOSTUNREACH, errno.ENETUNREACH, errno.ETIMEDOUT}
+#:
+#: By symbolic name, not through the `errno` module: the probe reports what the
+#: *container's* kernel said, and the container is always Linux, while this
+#: module runs on whatever the developer has. Numeric comparison worked on the
+#: Linux CI runner and failed on macOS, where ENETUNREACH is 51 to Linux's 101 —
+#: the same claim, refused for being asserted in the wrong kernel's numbering.
+#:
+#: EAI_NONAME is the probe's name-resolution verdict: the agent's resolver has
+#: no notion of the rail's name at all, because Docker's DNS answers only for
+#: services sharing a network. At least as strong as an unreachable address —
+#: the probe already collapses it into ENETUNREACH numerically — and which of
+#: the two a given Docker version produces varies, so both names are accepted.
+NO_ROUTE = {"EHOSTUNREACH", "ENETUNREACH", "ETIMEDOUT", "EAI_NONAME"}
 
 
 class TestTheSuiteIsNotVacuous:
@@ -107,7 +117,7 @@ class TestTheAgentHasNoRouteToTheRail:
         """
         verdict = stack.probe(AGENT, RAIL_HOST, RAIL_PORT)
 
-        assert verdict["errno"] in NO_ROUTE, (
+        assert verdict["errno_name"] in NO_ROUTE, (
             f"expected no route, got errno {verdict['errno']} "
             f"({verdict['errno_name']}) — a refusal is a running control, not an absent path"
         )
@@ -319,7 +329,7 @@ class TestWithTheGatewayStopped:
         verdict = stack.probe(AGENT, RAIL_HOST, RAIL_PORT)
 
         assert verdict["connected"] is False
-        assert verdict["errno"] in NO_ROUTE
+        assert verdict["errno_name"] in NO_ROUTE
 
     def test_the_rail_records_zero_requests_for_the_whole_case(self, stack: Stack) -> None:
         before = len(stack.rail_requests())
