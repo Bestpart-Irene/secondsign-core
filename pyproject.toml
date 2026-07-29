@@ -98,6 +98,12 @@ include = [
     "CONTRIBUTORS.md",
     "GOVERNANCE.md",
     "pyproject.toml",
+    # Same reason as CONTRIBUTORS.md, one layer further in: `test_ci_gates.py`
+    # reads `ci.yml` to assert that every job id `tools/ci_gates.py` reasons
+    # about still exists. Without the workflow here that test does not fail —
+    # it raises during collection, which interrupts the whole suite inside the
+    # artefact rather than reporting one missing file.
+    ".github/workflows",
 ]
 
 [tool.pytest.ini_options]

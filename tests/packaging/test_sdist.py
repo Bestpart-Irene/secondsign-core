@@ -78,3 +78,35 @@ def test_sdist_carries_no_compiled_artefacts(tmp_path):
     polluted = [name for name in names if name.endswith(".pyc") or "__pycache__" in name]
 
     assert not polluted, f"build by-products shipped in the sdist: {polluted}"
+
+
+def test_the_suite_inside_the_sdist_still_collects(tmp_path):
+    """The shape a missing file actually takes.
+
+    A module the suite imports but the artefact does not carry does not produce
+    one failing test. It raises during collection, and pytest then interrupts
+    the entire run — so the artefact reports nothing about anything, which is
+    the same silence as a suite that was never there.
+
+    Collection, not execution: the run is deliberately not repeated inside the
+    unpacked tree. This test builds an sdist, so an inner run that reached it
+    would build another one. Failures that need a test to actually execute are
+    therefore out of this gate's reach, and are not claimed to be in it.
+    """
+    with tarfile.open(_build_sdist(tmp_path)) as archive:
+        archive.extractall(tmp_path / "unpacked", filter="data")
+
+    unpacked = next((tmp_path / "unpacked").iterdir())
+    result = subprocess.run(  # noqa: S603 — fixed arguments, interpreter from sys.executable
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "--no-header"],
+        cwd=unpacked,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        "the suite does not collect inside the unpacked source distribution, "
+        "which means the artefact ships a test that imports something the "
+        f"artefact does not contain:\n{result.stdout[-2000:]}\n{result.stderr[-2000:]}"
+    )
