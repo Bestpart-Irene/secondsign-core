@@ -52,6 +52,13 @@ dev = [
     "mypy==2.3.0",
     "pyyaml==6.0.3",
     "stripe==15.3.1",
+    # `tests/packaging/test_sdist.py` builds a real source distribution rather
+    # than reading the include list, because the list is not the artefact. Both
+    # are dev dependencies so the build runs with `--no-isolation`: a test that
+    # reaches the network to fetch its own backend fails for reasons that have
+    # nothing to do with what it asserts.
+    "build==1.5.0",
+    "hatchling==1.31.0",
 ]
 
 [build-system]
@@ -71,6 +78,14 @@ packages = ["src/secondsign"]
 include = [
     "src/secondsign",
     "tests",
+    # Listed explicitly because the entries here are gitignore-style patterns:
+    # the bare "README.md" below is depth-agnostic and already matched the
+    # example's README, so omitting this line shipped a document describing two
+    # files that were not in the artefact. `tests/packaging/test_sdist.py`
+    # asserts the modules ship, because a `testpaths` entry that matches nothing
+    # is skipped in silence — the certification would simply not exist inside
+    # the published source distribution, and nothing would say so.
+    "examples",
     "docs",
     "tools",
     "README.md",
@@ -86,7 +101,10 @@ include = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# `examples/` is on the path so a worked example's conformance subclass is run by
+# the normal test suite — an example that ships a certification nobody executes
+# would rot the moment the surface it certifies against moved.
+testpaths = ["tests", "examples"]
 addopts = "-q"
 
 [tool.coverage.run]
@@ -113,6 +131,8 @@ select = ["E4", "E7", "E9", "F", "I", "B", "S"]
 # The conformance kit ships in src/ so third parties can import it, but it is
 # test code: assertions are its output, not a debugging shortcut.
 "src/secondsign/conformance/**" = ["S101"]
+# Worked examples carry their own tests, and a test's assertions are its output.
+"examples/**" = ["S101"]
 
 [tool.importlinter]
 root_package = "secondsign"
