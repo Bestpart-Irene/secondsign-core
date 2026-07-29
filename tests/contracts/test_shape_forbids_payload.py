@@ -114,6 +114,19 @@ def test_reference_fields_reject_anything_but_a_keyed_fingerprint():
             make_view(counterparty_ref=raw)
 
 
+def test_malformed_fingerprint_error_is_safe_and_actionable():
+    raw = "acct_1234567890"
+
+    with pytest.raises(ValidationError) as exc_info:
+        make_view(counterparty_ref=raw)
+
+    message = str(exc_info.value)
+
+    assert "fp: followed by 64 hexadecimal characters" in message
+    assert "fingerprint of the identifier" in message
+    assert raw not in message
+
+
 def test_no_free_text_channel_exists_at_all():
     """Superseded by CORE-S004: prose no longer crosses the boundary.
 
