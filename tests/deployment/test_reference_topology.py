@@ -30,6 +30,8 @@ which is a different statement from "nothing arrived".
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from tests.deployment.conftest import AGENT, GATEWAY, Stack
@@ -353,3 +355,120 @@ class TestDestinationSideAccounting:
         assert all(item.get("via") == "gateway" for item in requests), (
             "the rail recorded a request that did not arrive through the gateway"
         )
+
+
+#: One authorization, driven from inside the agent container through the
+#: sanctioned client. Written as a script rather than a fixture because it must
+#: run *there* — in an environment holding a client certificate, no rail
+#: credential, and no route to the rail.
+_AUTHORIZE = """
+import json
+from secondsign_client.transport import GatewayClient
+from secondsign_client.wire import AuthorizationRequest
+
+client = GatewayClient(
+    host="{host}",
+    port={port},
+    ca_file="/etc/secondsign/tls/ca-cert.pem",
+    client_cert="/etc/secondsign/tls/client-cert.pem",
+    client_key="/etc/secondsign/tls/client-key.pem",
+)
+outcome = client.request_authorization(
+    AuthorizationRequest(
+        action="payment",
+        rail="card",
+        currency="USD",
+        amount_minor={amount},
+        reversibility="irreversible",
+        counterparty_ref="fp:" + "ab" * 32,
+        source_account_ref="fp:" + "cd" * 32,
+        request_ref="fp:" + "{ref}" * 32,
+    )
+)
+print(json.dumps({{"status": outcome.status.value}}))
+"""
+
+
+class TestTheSanctionedPath:
+    """The other half of the demonstration.
+
+    Every case above is about what the agent cannot do. If that were all, the
+    deployment would be indistinguishable from one where the gateway is broken:
+    a boundary that refuses everything is not a boundary, it is an outage. These
+    cases run the same container, asking properly, and require money to move —
+    through the gateway, holding a credential this container does not have, over
+    a route this container does not have.
+    """
+
+    def _authorize(self, stack: Stack, *, amount: int, ref: str) -> dict[str, object]:
+        script = _AUTHORIZE.format(host=GATEWAY_HOST, port=GATEWAY_PORT, amount=amount, ref=ref)
+        result = stack.exec(AGENT, "python", "-c", script)
+        if not result.stdout.strip():
+            pytest.fail(
+                f"the client produced no outcome in the agent container.\n"
+                f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
+        return dict(json.loads(result.stdout.splitlines()[-1]))
+
+    def test_the_agent_environment_holds_the_client_and_no_control_plane(
+        self, stack: Stack
+    ) -> None:
+        """Executed, not asserted. `secondsign_client` imports; every
+        control-plane module is a ModuleNotFoundError — one term of no-bypass,
+        never the boundary itself."""
+        result = stack.exec(AGENT, "python", "-c", "import secondsign_client")
+        assert result.returncode == 0, f"the client is not installed: {result.stderr!r}"
+
+        for module in ("gateway", "rails", "approval", "audit", "policy"):
+            denied = stack.exec(AGENT, "python", "-c", f"import secondsign.{module}")
+            assert denied.returncode != 0, f"secondsign.{module} is importable in the agent"
+            assert "ModuleNotFoundError" in denied.stderr
+
+    def test_a_proposal_through_the_client_is_authorized_and_executed(self, stack: Stack) -> None:
+        outcome = self._authorize(stack, amount=4_200, ref="11")
+
+        assert outcome["status"] == "completed", (
+            "the sanctioned path did not complete; a boundary that refuses "
+            f"everything is an outage, not a control: {outcome}"
+        )
+
+    def test_the_rail_recorded_exactly_that_dispatch(self, stack: Stack) -> None:
+        """Destination-side, and now non-vacuous: the ledger is compared before
+        and after one authorization, so the count is evidence rather than two
+        zeroes agreeing with each other."""
+        before = len(stack.rail_requests())
+
+        self._authorize(stack, amount=1_500, ref="22")
+
+        after = stack.rail_requests()
+        assert len(after) == before + 1, (
+            f"one authorization produced {len(after) - before} rail requests"
+        )
+        assert after[-1]["via"] == "gateway"
+
+    def test_the_agent_still_holds_no_rail_credential_while_doing_it(self, stack: Stack) -> None:
+        """The claim the slice rests on, checked at the moment it matters: the
+        workload that just moved money cannot move any itself."""
+        self._authorize(stack, amount=900, ref="33")
+
+        assert stack.env_of(AGENT, "SECONDSIGN_RAIL_API_KEY") is None
+        assert stack.probe(AGENT, RAIL_HOST, RAIL_PORT)["connected"] is False
+
+    def test_a_proposal_over_the_limit_is_refused_and_moves_nothing(self, stack: Stack) -> None:
+        before = len(stack.rail_requests())
+
+        outcome = self._authorize(stack, amount=900_000_00, ref="44")
+
+        assert outcome["status"] == "refused"
+        assert len(stack.rail_requests()) == before, "a refused proposal reached the rail"
+
+    def test_with_the_gateway_stopped_the_sanctioned_path_refuses_too(self, stack: Stack) -> None:
+        """Not a locally computed verdict, and not an exception the agent could
+        mistake for one. Stop the gateway and authorization is impossible."""
+        stack.stop(GATEWAY)
+        try:
+            outcome = self._authorize(stack, amount=100, ref="55")
+        finally:
+            stack.start(GATEWAY)
+
+        assert outcome["status"] == "refused"

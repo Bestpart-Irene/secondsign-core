@@ -4,9 +4,16 @@
 
 This module is what `python -m secondsign.gateway.server` runs — the standalone
 process that ADR 0003 committed to. It terminates mTLS, derives the caller's
-identity, and refuses everything it cannot yet do. What it deliberately is not:
-an authorization endpoint. The wire contract is a later step of this slice, and
-until it lands the only verdict this process can honestly give is a refusal.
+identity from the certificate, and hands what survives to
+:mod:`secondsign.gateway.authorization`, which is where a proposal becomes a
+decided action.
+
+It authorizes nothing on its own. Everything below the identity check is
+transport: read a bounded body, refuse a smuggled principal, refuse an
+unrecognised dialect, and pass a validated proposal to the decision path. A
+deployment with no rail configured has no decision path, and then this process
+answers 503 — unavailability, which is a refusal, and never a locally invented
+verdict.
 
 **The seven-condition bind check** (ADR 0004 §5). On loopback, the process
 boundary is the authentication and plaintext is permitted. Anywhere else the
@@ -41,9 +48,10 @@ nothing else — a request body that carries a principal is refused rather than
 ignored, because an accepted-and-ignored field is one a later change can
 quietly start honouring.
 
-The rail credential never enters this module's configuration object. It stays
-in the environment until the rail executor — a later step — consumes it, so no
-repr, log line, or refusal detail can leak what this process was trusted with.
+The rail credential never enters this module's configuration object. It passes
+from the environment straight into the rail executor and stops there, so no
+repr, log line, or refusal detail can leak what this process was trusted with —
+a property a red-team case asserts by grepping the config's repr.
 """
 
 from __future__ import annotations
@@ -53,15 +61,26 @@ import json
 import os
 import ssl
 import sys
+from datetime import datetime, timezone
 from enum import StrEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Final, Mapping, cast
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from secondsign.agent.wire import PRINCIPAL_FIELDS, SUPPORTED_WIRE_VERSIONS
+from secondsign.agent.surface import AuthorizationRequest
+from secondsign.agent.wire import PRINCIPAL_FIELDS, SUPPORTED_WIRE_VERSIONS, WIRE_VERSION
+from secondsign.audit import AuditLog, InMemoryAuditSink
+from secondsign.contracts import Currency
+from secondsign.controlplane.fingerprint import FingerprintKey
+from secondsign.controlplane.window import WindowLedger
+from secondsign.decision import DecisionEngine
+from secondsign.gateway.authorization import AuthorizationService
+from secondsign.gateway.execution import ExecutionGateway, InMemoryIdempotencyStore
+from secondsign.policy import AmountLimit, AmountWindowPolicy
+from secondsign.rails.http import HTTPRailExecutor
 
 #: ADR 0004 §4: client leaf validity is capped at 24 hours, enforced rather than
 #: recommended. With no CRL and no OCSP, this number is the entire revocation
@@ -81,9 +100,9 @@ MAX_AUTHORIZE_BODY_BYTES: Final[int] = 1_048_576
 _PRINCIPAL_FIELDS: Final[tuple[str, ...]] = PRINCIPAL_FIELDS
 
 #: Every setting this process reads. Anything else under the prefix is a refusal
-#: to start. The rail entries are consumed by the rail executor when a later step
-#: of CORE-S019 wires it; they are named here so the reference deployment's
-#: environment is not refused, but `load_config` never stores their values.
+#: to start. The rail entries are read by `build_authorization` and consumed by
+#: the rail executor; `load_config` never stores their values, so the credential
+#: is not reachable through anything this module renders.
 KNOWN_SETTINGS: Final[frozenset[str]] = frozenset(
     {
         "SECONDSIGN_BIND",
@@ -350,8 +369,17 @@ def derive_principal(
 class _GatewayHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], allowlist: frozenset[str]) -> None:
+    def __init__(
+        self,
+        address: tuple[str, int],
+        allowlist: frozenset[str],
+        authorization: AuthorizationService | None = None,
+    ) -> None:
         self.allowlist = allowlist
+        #: None when the deployment configured no rail. The listener still
+        #: authenticates and still refuses — it simply has nothing to authorize
+        #: *onto*, and says so rather than inventing a verdict.
+        self.authorization = authorization
         super().__init__(address, _RequestHandler)
 
 
@@ -383,7 +411,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
         must not receive more than the audit trail does — audit, when wired,
         records keyed fingerprints, never raw identifiers (ADR 0004 §1)."""
 
-    def _respond(self, status: int, payload: dict[str, str]) -> None:
+    def _respond(self, status: int, payload: dict[str, object]) -> None:
         body = json.dumps(payload).encode()
         if status >= 400:
             # A refused request may not have been read; a half-read connection
@@ -458,11 +486,47 @@ class _RequestHandler(BaseHTTPRequestHandler):
             self._respond(400, {"refused": "wire_version_unrecognised"})
             return
 
-        # The dialect is right; the engine behind it is a later step of
-        # CORE-S019. The gateway declares itself unable to authorize — a
-        # refusal, stated as unavailability, and never a locally invented
-        # verdict.
-        self._respond(503, {"refused": "authorization_unavailable"})
+        self._authorize(payload)
+
+    def _authorize(self, payload: dict[str, object]) -> None:
+        """The dialect is right and the caller is who they said. Decide.
+
+        Three refusals come before the decision path, and their order is the
+        point: a deployment with no rail cannot authorize anything; a caller
+        with no derived identity cannot be namespaced, audited or scoped; and a
+        proposal that does not validate against the agent surface is not a
+        proposal this contract can carry.
+        """
+        service = cast(_GatewayHTTPServer, self.server).authorization
+        if service is None:
+            # No rail configured. A refusal stated as unavailability, never a
+            # locally invented verdict — the honest answer when this process
+            # holds no credential to move anything with.
+            self._respond(503, {"refused": "authorization_unavailable"})
+            return
+
+        principal = self.identity
+        if not isinstance(principal, DerivedPrincipal):
+            # Plaintext loopback: the process boundary authenticated the caller,
+            # and that is enough to *reach* the gateway and not enough to be
+            # one. An authorization needs a principal to namespace idempotency
+            # by, scope policy to, and fingerprint into the trail.
+            self._respond(403, {"refused": "no_identity"})
+            return
+
+        try:
+            request = AuthorizationRequest.model_validate(payload.get("request"))
+        except ValidationError:
+            # The detail is deliberately absent: the validator's message quotes
+            # the input, and the input is attacker-chosen bytes.
+            self._respond(400, {"refused": "malformed_request"})
+            return
+
+        outcome = service.authorize(principal.uri, request, now=datetime.now(tz=timezone.utc))
+        self._respond(
+            200,
+            {"wire_version": WIRE_VERSION, "outcome": outcome.model_dump(mode="json")},
+        )
 
     @staticmethod
     def _carries_a_principal(payload: dict[str, object]) -> bool:
@@ -495,14 +559,64 @@ class GatewayServer:
         self._http.server_close()
 
 
-def create_server(config: GatewayConfig) -> GatewayServer | ConfigurationRefusal:
+#: The reference deployment's demonstration limit: a rolling hour, capped in
+#: minor units. It is deliberately a constant and deliberately not a setting.
+#:
+#: A real deployment's limits are control-plane state under an authority that
+#: can be audited and relaxed on record (CORE-S017), not an environment variable
+#: on the process that enforces them — an operator who can raise a limit by
+#: editing the gateway's environment is an operator whose limit is a suggestion.
+#: Until that path is wired, a fixed number that is visibly a demonstration is
+#: more honest than a knob that looks like policy.
+REFERENCE_WINDOW_SECONDS: Final[int] = 3600
+REFERENCE_LIMIT_MINOR: Final[int] = 500_00
+
+
+def build_authorization(environ: Mapping[str, str]) -> AuthorizationService | None:
+    """Assemble the decision path, if this deployment has a rail to move on.
+
+    Returns None when either rail setting is absent: a gateway with no rail can
+    still authenticate, still refuse, and still be stood up for a topology test,
+    and it must not pretend to authorize onto a destination it does not have.
+
+    The credential passes from the environment into the executor and stops
+    there. It never enters :class:`GatewayConfig`, so no repr, log line or
+    refusal detail anywhere in this module can carry it — which is a property a
+    red-team case asserts by grepping.
+    """
+    url = environ.get("SECONDSIGN_RAIL_URL")
+    credential = environ.get("SECONDSIGN_RAIL_API_KEY")
+    if not url or not credential:
+        return None
+
+    limit = AmountLimit(
+        quote_currency=Currency.USD,
+        window_seconds=REFERENCE_WINDOW_SECONDS,
+        max_aggregate_minor=REFERENCE_LIMIT_MINOR,
+    )
+    return AuthorizationService(
+        engine=DecisionEngine([AmountWindowPolicy(limit)]),
+        gateway=ExecutionGateway(HTTPRailExecutor(url, credential), InMemoryIdempotencyStore()),
+        ledger=WindowLedger(window_seconds=limit.window_seconds),
+        audit=AuditLog(InMemoryAuditSink()),
+        # Generated per process. A restart therefore renders every earlier
+        # reference unresolvable, which is the correct trade for a reference
+        # deployment and is exactly what a durable control-plane key store
+        # exists to fix (INV-12, CORE-S017).
+        keys=FingerprintKey.generate(),
+    )
+
+
+def create_server(
+    config: GatewayConfig, *, authorization: AuthorizationService | None = None
+) -> GatewayServer | ConfigurationRefusal:
     """Bind the listener, or refuse.
 
     `load_config` proved the TLS material readable; this is where it must also
     parse. Garbage material is a refusal to start, never a listener that limps
     up without TLS.
     """
-    http_server = _GatewayHTTPServer((config.host, config.port), config.allowlist)
+    http_server = _GatewayHTTPServer((config.host, config.port), config.allowlist, authorization)
     if config.tls is not None:
         try:
             context = build_ssl_context(
@@ -525,14 +639,16 @@ def main(environ: Mapping[str, str] | None = None) -> int:
     if isinstance(config, ConfigurationRefusal):
         print(f"refusing to start: {config.reason.value}: {config.detail}", file=sys.stderr)
         return 2
-    server = create_server(config)
+    authorization = build_authorization(env)
+    server = create_server(config, authorization=authorization)
     if isinstance(server, ConfigurationRefusal):
         print(f"refusing to start: {server.reason.value}: {server.detail}", file=sys.stderr)
         return 2
 
     host, port = server.bound_address
     mode = "mTLS" if config.tls is not None else "plaintext loopback"
-    print(f"gateway listening on {host}:{port} ({mode})", flush=True)
+    rail = "rail configured" if authorization is not None else "no rail: refusing all"
+    print(f"gateway listening on {host}:{port} ({mode}, {rail})", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

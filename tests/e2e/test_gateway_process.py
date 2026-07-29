@@ -8,11 +8,12 @@ cheapest to isolate. This file is the whole assembly: a real listener with a
 real ephemeral PKI, spoken to by real TLS clients, including the ones that
 should get nothing.
 
-What is deliberately absent: any case in which the gateway authorizes anything.
-The wire contract is a later step of CORE-S019; until it lands the gateway's
-only honest verdicts are refusals, and the cases here pin that — a workload
-with a perfectly good certificate still gets `authorization_unavailable`, never
-a locally invented `completed`.
+Two gateways are stood up, and the difference between them is the point. The
+`gateway` fixture has no rail configured, so its only honest verdict is a
+refusal and every case against it pins that. The `wired_gateway` fixture has the
+whole decision path behind it and a loopback rail in front of a credential the
+caller never sees — so the cases against *that* one are where a decision, a
+dispatch, and the absence of a leak are asserted together.
 
 The PKI is the reference deployment's own generator, pointed at a temporary
 directory. Same issuer code, same SAN shape, same one-hour lifetime — so what
@@ -36,6 +37,7 @@ from secondsign.gateway import server as server_module
 from secondsign.gateway.server import (
     ConfigurationRefusal,
     GatewayConfig,
+    build_authorization,
     create_server,
     load_config,
     main,
@@ -44,6 +46,10 @@ from tests.deployment.conftest import REFERENCE
 
 PRINCIPAL = "spiffe://secondsign.example/agent/reference"
 STRANGER_PRINCIPAL = "spiffe://secondsign.example/agent/stranger"
+
+#: The fake rail credential the wired gateway holds. Asserted absent from every
+#: byte the caller receives — this string existing in this file is the point.
+RAIL_CREDENTIAL = "sk_reference_not_a_real_key"
 
 
 def _load_generator():
@@ -183,7 +189,9 @@ class TestAnAuthenticatedWorkload:
 
         assert response.getheader("Server") == "secondsign-gateway"
 
-    def test_gets_no_verdict_while_authorization_is_unwired(self, gateway, pki) -> None:
+    def test_gets_no_verdict_when_no_rail_is_configured(self, gateway, pki) -> None:
+        """Unavailability, not a verdict. This gateway holds no credential and
+        has nowhere to dispatch, and says so."""
         response, body = _request(
             gateway,
             _client_context(pki),
@@ -349,3 +357,189 @@ class TestTheProcessLifecycle:
         monkeypatch.setattr(server_module.GatewayServer, "serve_forever", lambda self: None)
 
         assert main(environ={"SECONDSIGN_BIND": "127.0.0.1:0"}) == 0
+
+
+@pytest.fixture(scope="module")
+def wired_gateway(pki):
+    """The whole assembly over real mTLS: a gateway with a rail behind it.
+
+    The rail is a loopback HTTP server that records what it was dispatched, so
+    the case that matters — did an authorization actually reach a rail, holding
+    a credential the caller never saw — is answered at the destination rather
+    than inferred from the response.
+    """
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    dispatched: list[bytes] = []
+
+    class _RailHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's dispatch name
+            dispatched.append(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+            """Silent."""
+
+    rail = ThreadingHTTPServer(("127.0.0.1", 0), _RailHandler)
+    rail.daemon_threads = True
+    rail_thread = threading.Thread(target=rail.serve_forever, daemon=True)
+    rail_thread.start()
+    rail_host, rail_port = rail.server_address[:2]
+
+    config = load_config(
+        {
+            "SECONDSIGN_BIND": "127.0.0.1:0",
+            "SECONDSIGN_TLS_CERT": str(pki["gateway_cert"]),
+            "SECONDSIGN_TLS_KEY": str(pki["gateway_key"]),
+            "SECONDSIGN_CLIENT_CA": str(pki["ca_cert"]),
+            "SECONDSIGN_CLIENT_ALLOWLIST": PRINCIPAL,
+        }
+    )
+    assert isinstance(config, GatewayConfig)
+    service = build_authorization(
+        {
+            "SECONDSIGN_RAIL_URL": f"http://{rail_host}:{rail_port}/dispatch",
+            "SECONDSIGN_RAIL_API_KEY": RAIL_CREDENTIAL,
+        }
+    )
+    server = create_server(config, authorization=service)
+    assert not isinstance(server, ConfigurationRefusal), f"gateway refused to start: {server!r}"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.bound_address, dispatched
+    finally:
+        server.shutdown()
+        server.close()
+        thread.join(timeout=5)
+        rail.shutdown()
+        rail_thread.join(timeout=5)
+        rail.server_close()
+
+
+def _proposal(**overrides) -> dict:
+    fingerprint = "fp:" + "ab" * 32
+    proposal = {
+        "action": "payment",
+        "rail": "card",
+        "currency": "USD",
+        "amount_minor": 4_200,
+        "reversibility": "irreversible",
+        "counterparty_ref": fingerprint,
+        "source_account_ref": fingerprint,
+        "request_ref": "fp:" + "cd" * 32,
+    }
+    proposal.update(overrides)
+    return proposal
+
+
+class TestTheWholeAssembly:
+    """An authenticated workload proposes, the gateway decides, and a rail the
+    workload cannot reach is the only thing that moves money."""
+
+    def test_an_authorized_payment_reaches_the_rail(self, wired_gateway, pki) -> None:
+        address, dispatched = wired_gateway
+        before = len(dispatched)
+
+        response, body = _request(
+            address,
+            _client_context(pki),
+            method="POST",
+            path="/authorize",
+            body=json.dumps({"wire_version": 1, "request": _proposal()}).encode(),
+        )
+
+        assert response.status == 200
+        payload = json.loads(body)
+        assert payload["wire_version"] == 1
+        assert payload["outcome"]["status"] == "completed"
+        assert len(dispatched) == before + 1
+
+    def test_the_rail_credential_never_appears_on_the_wire(self, wired_gateway, pki) -> None:
+        """The claim the whole slice rests on, checked at the one place a leak
+        would be invisible: the bytes the caller actually receives."""
+        address, _ = wired_gateway
+
+        _, body = _request(
+            address,
+            _client_context(pki),
+            method="POST",
+            path="/authorize",
+            body=json.dumps(
+                {"wire_version": 1, "request": _proposal(request_ref="fp:" + "11" * 32)}
+            ).encode(),
+        )
+
+        assert RAIL_CREDENTIAL not in body.decode()
+
+    def test_a_denial_moves_nothing(self, wired_gateway, pki) -> None:
+        address, dispatched = wired_gateway
+        before = len(dispatched)
+
+        _, body = _request(
+            address,
+            _client_context(pki),
+            method="POST",
+            path="/authorize",
+            body=json.dumps(
+                {
+                    "wire_version": 1,
+                    "request": _proposal(amount_minor=900_000_00, request_ref="fp:" + "22" * 32),
+                }
+            ).encode(),
+        )
+
+        outcome = json.loads(body)["outcome"]
+        assert outcome["status"] == "refused"
+        assert "value_band_exceeded" in outcome["reasons"]
+        assert len(dispatched) == before, "a denied proposal was dispatched anyway"
+
+    def test_an_outcome_carries_no_raw_identity(self, wired_gateway, pki) -> None:
+        address, _ = wired_gateway
+
+        _, body = _request(
+            address,
+            _client_context(pki),
+            method="POST",
+            path="/authorize",
+            body=json.dumps(
+                {"wire_version": 1, "request": _proposal(request_ref="fp:" + "33" * 32)}
+            ).encode(),
+        )
+
+        assert PRINCIPAL not in body.decode()
+
+    def test_a_proposal_that_is_not_the_agent_surface_is_refused(self, wired_gateway, pki) -> None:
+        """Refused without explanation: the validator's message quotes the
+        input, and the input is attacker-chosen bytes."""
+        address, _ = wired_gateway
+
+        response, body = _request(
+            address,
+            _client_context(pki),
+            method="POST",
+            path="/authorize",
+            body=json.dumps({"wire_version": 1, "request": {"amount_minor": -1}}).encode(),
+        )
+
+        assert response.status == 400
+        assert json.loads(body) == {"refused": "malformed_request"}
+
+    def test_an_authenticated_stranger_still_gets_nowhere(self, wired_gateway, pki) -> None:
+        """A rail behind the gateway does not widen who may reach it."""
+        address, dispatched = wired_gateway
+        before = len(dispatched)
+
+        response, body = _request(
+            address,
+            _client_context(pki, cert="stranger"),
+            method="POST",
+            path="/authorize",
+            body=json.dumps({"wire_version": 1, "request": _proposal()}).encode(),
+        )
+
+        assert response.status == 403
+        assert json.loads(body) == {"refused": "unknown_principal"}
+        assert len(dispatched) == before

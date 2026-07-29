@@ -17,6 +17,12 @@ FROZEN_FIELDS = {
     "reasons": False,
     "outcome_status": False,
     "approval_id": False,
+    # Added by CORE-S019, deliberately and through this ratchet. A trail that
+    # cannot say *which workload* asked cannot answer the question an incident
+    # starts with. It is admitted only in its already-redacted form: the type is
+    # `Fingerprint`, so a raw URI SAN is not representable in it, and the key
+    # that produced it is control plane.
+    "principal_ref": False,
     "receipt_hash": True,
 }
 

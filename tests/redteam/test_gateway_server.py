@@ -48,6 +48,7 @@ from secondsign.gateway.server import (
     PrincipalRefusal,
     PrincipalRefusalReason,
     StartupRefusalReason,
+    build_authorization,
     build_ssl_context,
     create_server,
     derive_principal,
@@ -404,8 +405,9 @@ class TestABodySuppliedPrincipalIsRefused:
         assert payload == {"refused": "body_supplied_principal"}
 
     def test_a_body_without_a_principal_gets_no_verdict(self, loopback_gateway) -> None:
-        """Until authorization is wired, the gateway declares itself unable to
-        authorize — a refusal, never a locally invented verdict."""
+        """This gateway has no rail configured, so it declares itself unable to
+        authorize — a refusal stated as unavailability, never a locally invented
+        verdict. A gateway that *does* have one is exercised below."""
         status, payload = _post(loopback_gateway, json.dumps({"wire_version": 1}).encode())
 
         assert status == 503
@@ -483,3 +485,82 @@ class TestABodySuppliedPrincipalIsRefused:
 
         assert status == 404
         assert payload == {"refused": "unknown_path"}
+
+
+@pytest.fixture()
+def wired_loopback_gateway():
+    """A loopback gateway that *does* have a rail, so `/authorize` reaches the
+    decision path instead of stopping at unavailability."""
+    config = load_config({"SECONDSIGN_BIND": "127.0.0.1:0"})
+    assert isinstance(config, GatewayConfig)
+    service = build_authorization(
+        {
+            "SECONDSIGN_RAIL_URL": "http://127.0.0.1:1/dispatch",
+            "SECONDSIGN_RAIL_API_KEY": "sk_reference_not_a_real_key",
+        }
+    )
+    assert service is not None
+    server = create_server(config, authorization=service)
+    assert not isinstance(server, ConfigurationRefusal)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.bound_address
+    finally:
+        server.shutdown()
+        server.close()
+        thread.join(timeout=5)
+
+
+class TestAuthorizationNeedsAPrincipalAndARail:
+    """Two things `/authorize` will not do without: authorize onto a rail that
+    is not configured, and authorize *for* a caller it cannot name."""
+
+    def test_no_rail_configured_means_no_verdict(self) -> None:
+        """Both settings, or nothing. A URL without a credential is not a rail
+        this process can reach, and half a configuration must not become a
+        gateway that looks wired and refuses everything for a subtler reason."""
+        assert build_authorization({}) is None
+        assert build_authorization({"SECONDSIGN_RAIL_URL": "http://rail:9000"}) is None
+        assert build_authorization({"SECONDSIGN_RAIL_API_KEY": "sk_x"}) is None
+        assert (
+            build_authorization({"SECONDSIGN_RAIL_URL": "", "SECONDSIGN_RAIL_API_KEY": ""}) is None
+        )
+
+    def test_a_caller_with_no_derived_identity_is_refused(self, wired_loopback_gateway) -> None:
+        """Plaintext loopback authenticates *reaching* the gateway and does not
+        make the caller a principal. An authorization needs one — to namespace
+        idempotency by, to scope policy to, and to fingerprint into the trail —
+        so it is refused rather than run under an anonymous identity."""
+        body = json.dumps({"wire_version": 1, "request": _valid_proposal()}).encode()
+
+        status, payload = _post(wired_loopback_gateway, body)
+
+        assert status == 403
+        assert payload == {"refused": "no_identity"}
+
+    def test_the_refusal_order_puts_identity_before_the_proposal(
+        self, wired_loopback_gateway
+    ) -> None:
+        """A caller with no identity learns nothing about whether its proposal
+        would have parsed."""
+        body = json.dumps({"wire_version": 1, "request": {"nonsense": True}}).encode()
+
+        status, payload = _post(wired_loopback_gateway, body)
+
+        assert status == 403
+        assert payload == {"refused": "no_identity"}
+
+
+def _valid_proposal() -> dict:
+    fingerprint = "fp:" + "ab" * 32
+    return {
+        "action": "payment",
+        "rail": "card",
+        "currency": "USD",
+        "amount_minor": 4200,
+        "reversibility": "irreversible",
+        "counterparty_ref": fingerprint,
+        "source_account_ref": fingerprint,
+        "request_ref": fingerprint,
+    }

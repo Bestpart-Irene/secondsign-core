@@ -93,8 +93,11 @@ services:
 
   agent:
     build:
-      context: .
-      dockerfile: agent/Dockerfile
+      # The repository root, because this container installs `secondsign-client`
+      # from source. It gets the client and nothing else: no core, no rails, no
+      # gateway — which the deployment suite verifies by executing the import.
+      context: ../..
+      dockerfile: deploy/reference/agent/Dockerfile
     # One network. This line is the security control.
     networks: [agentnet]
     volumes:

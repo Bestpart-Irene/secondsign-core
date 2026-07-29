@@ -124,15 +124,24 @@ with the certificate identity model in
 
 ## Status
 
-`CORE-S019` is in progress. The topology, the mock rail, the PKI and the gateway
-process are built: `python -m secondsign.gateway.server` terminates mTLS, derives
-the caller's identity from the certificate, and the stack comes up. The
-deployment suite and the mutation check both run in CI.
+`CORE-S019` is in progress, and the vertical path is closed: an agent in the
+agent container, holding a client certificate and no rail credential, proposes a
+payment through `secondsign-client`; the gateway authenticates it, decides it,
+dispatches it to the rail, and answers. The deployment suite, the sanctioned-path
+cases and the mutation check all run in CI.
 
-What the gateway does **not** do yet is authorize. `/authorize` answers `503
-authorization_unavailable` to a perfectly authenticated caller, because the
-decision engine behind it is a later step of this slice and a refusal is the
-only honest verdict until then. One consequence is visible in the suite:
-`TestDestinationSideAccounting` compares the rail's ledger against what the
-gateway dispatched, and passes today because both are zero. It becomes evidence
-when the gateway starts dispatching.
+The agent container now installs `secondsign-client` — and only that. `import
+secondsign.gateway` in there is a `ModuleNotFoundError`, executed by the suite
+rather than asserted. The adversarial cases remain standard-library and remain
+the point: what the client demonstrates is that the same workload, asking
+properly, moves money it has no route and no credential to move itself.
+
+Limits in this deployment are a fixed demonstration constant in the gateway, not
+a setting. That is deliberate — an operator who can raise a limit by editing the
+enforcing process's environment has a limit that is a suggestion. Real limits are
+control-plane state under an auditable authority (`CORE-S017`), which is not yet
+wired.
+
+What is still missing: the maker-checker flow behind a `REVIEW`. The decision
+path can return `awaiting_review`, and nothing in this deployment yet presents
+that to a human or carries an approval back.
