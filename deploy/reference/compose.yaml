@@ -70,6 +70,10 @@ services:
       # holds the signing key — is mounted into nothing at all: an agent that
       # could read it could mint a certificate naming itself any principal.
       - ./tls/gateway:/etc/secondsign/tls:ro
+      # The vacuity guard probes rail reachability *from this container* —
+      # "the rail is unreachable from the agent" means nothing until something
+      # is shown to reach it. Same read-only probe the agent gets.
+      - ./adversary:/adversary:ro
     environment:
       # The rail credential lives here and nowhere else. `tests/deployment/`
       # asserts its presence here and its absence from the agent.
