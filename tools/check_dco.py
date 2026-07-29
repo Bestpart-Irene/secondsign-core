@@ -85,8 +85,19 @@ address you actually use. It certifies that you have the right to submit
 the work under Apache-2.0; it is not a copyright assignment, and it gives
 no one a right to relicense your contribution. See CONTRIBUTING.md.
 
-    git config user.name  "Your Name"
-    git config user.email "you@example.com"      # your real address
+First, the identity your commits will carry. Not a placeholder — this
+message used to suggest `you@example.com`, which is one of the addresses
+rule 3 below rejects, so the advice failed the check it was advising on.
+
+    git config user.name  "Ada Lovelace"
+    git config user.email <the address on your GitHub account>
+
+GitHub will issue you a privacy address if you would rather not publish
+your own — Settings → Emails → "Keep my email addresses private" gives
+you an `ID+USERNAME@users.noreply.github.com`. It attributes the commit
+to you and passes this gate.
+
+Then rewrite the commits that are already here:
 
     git rebase origin/main --exec 'git commit --amend --no-edit --reset-author -s'
     git push --force-with-lease
