@@ -25,7 +25,7 @@ process an operator runs.** `secondsign.agent` cannot import
 code beside the agent from writing:
 
 ```python
-from secondsign.gateway import ExecutionGateway   # not from secondsign.agent
+from secondsign.gateway import ExecutionGateway  # not from secondsign.agent
 ```
 
 and constructing a gateway of its own. What actually stops that today is that
