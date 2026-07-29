@@ -23,9 +23,31 @@ match".
 from __future__ import annotations
 
 import importlib.util
+import shutil
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _init_repo(path: Path) -> None:
+    """A repository with one commit, owned by the test rather than the runner.
+
+    `git` is resolved to an absolute path the way the checker resolves it, and
+    the identity is set locally so the test does not depend on the machine
+    having one configured.
+    """
+    executable = shutil.which("git")
+    assert executable is not None, "git executable not found"
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.name", "Test Runner"),
+        ("config", "user.email", "runner@secondsign.invalid"),
+        ("commit", "-q", "--allow-empty", "-m", "root", "--no-gpg-sign"),
+    ):
+        subprocess.run(  # noqa: S603 — resolved executable, fixed arguments
+            [executable, *args], cwd=path, check=True, capture_output=True
+        )
 
 
 def _load_checker():
@@ -183,8 +205,17 @@ class TestTheRangeItReads:
         assert checker.main(["check_dco.py"]) == 0
         assert "skipping" in capsys.readouterr().out
 
-    def test_an_empty_range_passes(self, capsys) -> None:
-        """A range with no commits is not a violation, and must not read as one."""
+    def test_an_empty_range_passes(self, capsys, monkeypatch, tmp_path) -> None:
+        """A range with no commits is not a violation, and must not read as one.
+
+        The repository it reads is built here rather than inherited from the
+        working directory. Run inside an unpacked source distribution there is
+        no `.git`, and this test then asserted the *next* case down — a range it
+        cannot read — while still reporting itself as the empty-range one.
+        """
+        _init_repo(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
         assert checker.main(["check_dco.py", "HEAD..HEAD"]) == 0
         assert "ok" in capsys.readouterr().out
 
