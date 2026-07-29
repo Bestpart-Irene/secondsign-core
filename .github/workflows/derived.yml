@@ -47,21 +47,31 @@ jobs:
       # The full history, or the tools see one author and no merged slice, and
       # refuse to judge.
       #
-      # The token matters more than it looks. GitHub deliberately does not start
-      # workflow runs from events made with the default `GITHUB_TOKEN`, so a
-      # pull request opened with it arrives carrying **no checks at all** — and
-      # `main` requires them, which makes that pull request permanently
-      # unmergeable. Not a failure anyone would see: the job goes green, the
-      # pull request appears, and it simply never becomes mergeable.
+      # The token matters more than it looks, and there are two separate ways
+      # the default one is not enough.
+      #
+      # First: without either `CONTRIBUTORS_TOKEN` or the "Allow GitHub Actions
+      # to create and approve pull requests" setting, `gh pr create` fails
+      # outright with "GitHub Actions is not permitted to create or approve pull
+      # requests". That is a red `main` for a reason with nothing to do with the
+      # code, and it is what happened on this repository's first external slice
+      # contribution — the new contributor's name simply never landed.
+      #
+      # Second, and the reason the setting is deliberately left off: events made
+      # with the default `GITHUB_TOKEN` do not start workflow runs, and the one
+      # documented exception does not help here. A pull request it opens creates
+      # runs in an **approval-required** state — they exist, they report nothing,
+      # and somebody has to press "Approve and run" before any check completes.
+      # A refresh that waits for a human is not a refresh, and until that click
+      # the pull request cannot satisfy branch protection.
+      # https://docs.github.com/en/actions/concepts/security/github_token
       #
       # `CONTRIBUTORS_TOKEN` is a fine-grained personal access token scoped to
-      # this repository with Contents: write and Pull requests: write. With it,
-      # the refresh behaves like anyone else's pull request. Without it, and
-      # without "Allow GitHub Actions to create and approve pull requests" in
-      # Settings → Actions → General, `gh pr create` fails outright with
-      # "GitHub Actions is not permitted to create or approve pull requests" —
-      # a red `main` for a reason that has nothing to do with the code, which is
-      # what happened on this repository's first external slice contribution.
+      # this repository alone, with Contents: read and write and Pull requests:
+      # read and write, and nothing else. With it the refresh behaves like any
+      # maintainer's pull request: CI starts on its own. The wider "create and
+      # approve pull requests" permission is not taken, because automation has no
+      # business approving its own work and this needs only the narrow grant.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -132,8 +142,9 @@ jobs:
                 '' \
                 '---' \
                 '' \
-                'If this pull request shows no checks, the repository has no' \
-                '`CONTRIBUTORS_TOKEN` secret and it was opened with the default' \
-                'token, whose events deliberately start no workflow runs. Close and' \
-                'reopen it to run CI, or add the token — see the workflow comment.')"
+                'If this pull request'"'"'s checks are waiting for approval rather than' \
+                'running, the repository has no `CONTRIBUTORS_TOKEN` secret and it was' \
+                'opened with the default token, whose pull requests create runs in an' \
+                'approval-required state. Press "Approve and run" this once, then add' \
+                'the token — see the workflow comment.')"
           fi
