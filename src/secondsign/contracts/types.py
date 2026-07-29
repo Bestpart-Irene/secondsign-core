@@ -15,7 +15,17 @@ keyed fingerprint. Neither is a rule someone has to remember to follow.
 from enum import IntEnum, StrEnum
 from typing import Annotated
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    WrapValidator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
+from pydantic_core.core_schema import ValidatorFunctionWrapHandler
 
 #: Version of this contract. A plugin declaring anything else is not consulted.
 #: Adding a field, a verdict, or an enum member is a version change.
@@ -34,7 +44,37 @@ FINGERPRINT_PATTERN = r"^fp:[0-9a-f]{64}$"
 #: encode an identifier in a quantity field (threat A5).
 MAX_DETAIL_MAGNITUDE = 1_000_000_000_000
 
-Fingerprint = Annotated[str, Field(pattern=FINGERPRINT_PATTERN)]
+
+def _validate_fingerprint(
+    value: object,
+    handler: ValidatorFunctionWrapHandler,
+) -> str:
+    try:
+        return handler(value)
+    except ValidationError:
+        error = PydanticCustomError(
+            "fingerprint_format",
+            "Expected fp: followed by 64 hexadecimal characters; "
+            "provide a fingerprint of the identifier, not the identifier itself",
+        )
+        raise ValidationError.from_exception_data(
+            "Fingerprint",
+            [
+                {
+                    "type": error,
+                    "loc": (),
+                    "input": None,
+                }
+            ],
+            hide_input=True,
+        ) from None
+
+
+Fingerprint = Annotated[
+    str,
+    Field(pattern=FINGERPRINT_PATTERN),
+    WrapValidator(_validate_fingerprint),
+]
 
 
 class PluginVerdict(IntEnum):

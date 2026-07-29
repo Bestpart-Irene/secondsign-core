@@ -61,6 +61,20 @@ def test_raw_account_identifier_is_unrepresentable():
         make_dimensions(counterparty_ref="4111111111111111")
 
 
+def test_malformed_fingerprint_error_is_safe_for_decision_dimensions():
+    raw = "acct_1234567890"
+
+    with pytest.raises(ValidationError) as exc_info:
+        make_dimensions(counterparty_ref=raw)
+
+    message = str(exc_info.value)
+
+    assert "fp: followed by 64 hexadecimal characters" in message
+    assert "fingerprint of the identifier" in message
+    assert raw not in message
+    assert raw not in repr(exc_info.value.errors())
+
+
 def test_dimensions_are_frozen():
     d = make_dimensions()
     with pytest.raises(ValidationError):
