@@ -4,6 +4,27 @@ name: CI
 # ask whether a change is acceptable: if CI is green and the slice manifest
 # validates, the security boundary is intact by construction.
 #
+# The shape is five jobs and a gate:
+#
+#   preflight     one Python, the checks that answer the same on every version:
+#                 lint, format, types, import boundaries, manifests, status,
+#                 declared scope. Running these three times told us three times
+#                 that a line was too long.
+#   tests         the version matrix, because a *test* result genuinely differs
+#                 between 3.11 and 3.13, and nothing else here does.
+#   onchain       Solidity — conditional; see tools/ci_gates.py
+#   independence  dependency boundary, sign-off, secret scan
+#   package       build, distribution metadata, dependency licences
+#   CI gate       the one required check on `main`
+#
+# `CI gate` fails unless every job above either succeeded or was skipped for a
+# reason `tools/ci_gates.py` had already recorded. Two things follow. The matrix
+# can gain a Python version, or a job can be split, without anyone editing
+# branch protection — and a job that quietly stops running fails the build
+# instead of vanishing into a grey tick, which is what a protection rule listing
+# job names cannot notice: a required check that no longer exists is simply
+# never reported.
+#
 # Every action is pinned to a commit SHA rather than a tag. A tag is a mutable
 # pointer its owner can move, so `@v4` names whatever that account publishes
 # next — and these jobs decide whether a change to a payment authorization
@@ -26,18 +47,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Lint, types, tests, boundaries
+  # Everything whose answer does not depend on the Python version, once.
+  preflight:
+    name: Preflight
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+    outputs:
+      # Which conditional jobs this change needs. The `if:` expressions below
+      # carry no logic of their own — they read this, and `CI gate` checks it
+      # against what actually ran.
+      decisions: ${{ steps.gates.outputs.decisions }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: pip
       - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
 
@@ -47,15 +71,6 @@ jobs:
         run: ruff format --check .
       - name: Types
         run: mypy src
-
-      # README states branch coverage is 100%. A claim about this repository that
-      # only a convention keeps true is the kind of drift this project cannot
-      # afford, so the gate is set where the claim is rather than below it.
-      # Coverage is an execution measure, not evidence the assertions are right —
-      # it belongs here as a ratchet, and nowhere as a security argument.
-      - name: Tests (unit, properties, contracts, conformance, architecture)
-        run: pytest --cov=secondsign --cov-report=term-missing --cov-fail-under=100
-
       - name: Import and architecture boundaries
         run: lint-imports
 
@@ -68,13 +83,23 @@ jobs:
       # a stale status table is precisely the drift that costs a security project
       # its credibility.
       #
-      # The fetch is not optional. The default checkout is shallow, and the tool
-      # refuses to judge staleness from a history in which it can attribute no
-      # slice at all — reporting everything as unbuilt would be the fail-open
-      # form of this check. This step is also where freshness against the real
-      # repository is asserted; the test suite deliberately does not, so that it
-      # keeps passing on a shallow clone.
+      # The fetch is not optional. The tool refuses to judge staleness from a
+      # history in which it can attribute no slice at all — reporting everything
+      # as unbuilt would be the fail-open form of this check. This step is also
+      # where freshness against the real repository is asserted; the test suite
+      # deliberately does not, so that it keeps passing on a shallow clone.
+      #
+      # Pull requests only, and that is not a loophole. What this check defends
+      # against is someone maintaining STATUS.md by hand, which can only happen
+      # on a branch. On a push to `main` it asks a question the commit under test
+      # cannot answer: a slice is complete once trunk holds the merge of its
+      # branch, so the merge that completes a slice is guaranteed to arrive with
+      # a stale file, every time, through no one's fault. Failing there reports
+      # the project succeeding, and a check that cries wolf on success is how a
+      # red `main` stops meaning anything. `.github/workflows/derived.yml`
+      # regenerates the file after the merge instead.
       - name: Roadmap status table is not stale
+        if: github.event_name == 'pull_request'
         run: |
           git fetch --no-tags --depth=200 origin main:refs/remotes/origin/main
           python tools/render_roadmap.py --check
@@ -88,7 +113,43 @@ jobs:
           git fetch --no-tags --depth=1 origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" || true
           python tools/check_slice_scope.py
 
+      - name: Which conditional jobs this change needs
+        id: gates
+        run: python tools/ci_gates.py decide
+
+  # The version matrix, and only what a version can change the answer to.
+  #
+  # README states branch coverage is 100%. A claim about this repository that
+  # only a convention keeps true is the kind of drift this project cannot
+  # afford, so the gate is set where the claim is rather than below it. Coverage
+  # is an execution measure, not evidence the assertions are right — it belongs
+  # here as a ratchet, and nowhere as a security argument.
+  tests:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Tests (unit, properties, contracts, conformance, architecture)
+        run: pytest --cov=secondsign --cov-report=term-missing --cov-fail-under=100
+
   # The Solidity gates a slice declares as `forge_fmt` and `forge_test`.
+  #
+  # Conditional: it downloads a pinned Foundry release and an npm tree in order
+  # to read `.sol` files, and a change to a Python policy module needs neither.
+  # The decision is `tools/ci_gates.py`'s, made from the changed paths *and* the
+  # branch's slice manifest, and covered by tests — because an untested `if:`
+  # expression that wrongly skips a gate reports the same grey tick as one that
+  # rightly does. `CI gate` then refuses any skip that decision did not sanction.
   #
   # Foundry is pinned by version and checksum rather than taken from an action
   # tag, for the same reason gitleaks is below: a verification job that silently
@@ -98,6 +159,8 @@ jobs:
   onchain:
     name: On-chain verification (Solidity)
     runs-on: ubuntu-latest
+    needs: preflight
+    if: fromJSON(needs.preflight.outputs.decisions).onchain
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -314,3 +377,28 @@ jobs:
               print("ok: every dependency offers a permissive licence")
           sys.exit(1 if bad else 0)
           PY
+
+  # The one required status check on `main`.
+  #
+  # `if: always()` so it runs even when something above it failed — a gate that
+  # is itself skipped whenever a job fails would report nothing, which is the
+  # exact shape of the problem it exists to catch.
+  gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [preflight, tests, onchain, independence, package]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # No `pip install`. This is the last check standing between a silent skip
+      # and a merge; it depends on the standard library and nothing else, so it
+      # cannot fail — or pass — for a reason unrelated to what it is checking.
+      - name: Every job that had to run, ran and passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          DECISIONS: ${{ needs.preflight.outputs.decisions }}
+        run: python tools/ci_gates.py verify

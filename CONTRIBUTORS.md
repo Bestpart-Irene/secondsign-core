@@ -15,11 +15,12 @@ here means a commit landed — not a level of involvement.
 
 - Irene — [@Bestpart-Irene](https://github.com/Bestpart-Irene)
 
-## Everyone who has landed a commit (3)
+## Everyone who has landed a commit (4)
 
 - irene-the-best
 - EddyJJHuang
 - Gerry Tao
+- Elmar Bayramov
 
 Avatars, handles and commit counts live on the
 [contributors graph](https://github.com/Bestpart-Irene/secondsign-core/graphs/contributors),

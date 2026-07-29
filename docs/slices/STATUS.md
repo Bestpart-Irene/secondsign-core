@@ -28,7 +28,7 @@ slice that stops for a human before it is marked done.
 |---|---|---|
 | `ONCHAIN-S003` ⚑ | Generalise the strictness algebra in a private kernel without moving the public surface | ONCHAIN-S002 |
 
-## Complete (18)
+## Complete (19)
 
 | Slice | Title | Waiting on |
 |---|---|---|
@@ -50,6 +50,7 @@ slice that stops for a human before it is marked done.
 | `CORE-S016` | Red-team matrix expansion | — |
 | `CORE-S017` ⚑ | Structural control-plane isolation from the managed agent | — |
 | `CORE-S020` ⚑ | Publish the on-chain threat model and admit on-chain slices to the queue | — |
+| `CORE-S021` | Explain malformed Fingerprint values without exposing identifiers | — |
 
 ---
 
