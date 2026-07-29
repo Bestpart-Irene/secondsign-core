@@ -22,6 +22,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +36,13 @@ COMPOSE_FILE = REFERENCE / "compose.yaml"
 AGENT = "agent"
 GATEWAY = "gateway"
 RAIL = "rail"
+
+#: The port the gateway binds inside its own container.
+GATEWAY_LISTEN_PORT = 8787
+
+#: How long a gateway that is going to start is given to finish starting. Long
+#: enough for a cold image build's first boot; expiring is not itself an error.
+GATEWAY_START_SECONDS = 30.0
 
 
 def _docker() -> str:
@@ -59,6 +67,23 @@ def _run(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
 
 def _compose(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
     return _run("compose", "-f", str(COMPOSE_FILE), *args, check=check)
+
+
+def _wait_for_listener(service: str, port: int, seconds: float) -> None:
+    """Give a best-effort service a bounded chance to bind its listener.
+
+    Returns either way. A service that never binds leaves the cases that need it
+    to report that themselves — this removes a race, and cannot mask a failure:
+    the question asked here is "is something bound inside your own container",
+    and every claim this suite makes is about reachability *across a network
+    boundary* from somewhere else.
+    """
+    deadline = time.monotonic() + seconds
+    connect = f"import socket;socket.create_connection(('127.0.0.1',{port}),timeout=2)"
+    while time.monotonic() < deadline:
+        if _compose("exec", "-T", service, "python", "-c", connect).returncode == 0:
+            return
+        time.sleep(1.0)
 
 
 @dataclass(frozen=True)
@@ -92,8 +117,16 @@ class Stack:
     def stop(self, service: str) -> None:
         _compose("stop", service, check=True)
 
-    def start(self, service: str) -> None:
+    def start(self, service: str, *, listen_port: int = GATEWAY_LISTEN_PORT) -> None:
+        """Start a stopped service and wait for it to be listening again.
+
+        `compose start` returns when the container is running, which is earlier
+        than when the process inside it has bound its socket. Without the wait,
+        a case that restores the gateway hands the next case a gateway that is
+        up by Docker's definition and absent by the network's.
+        """
         _compose("start", service, check=True)
+        _wait_for_listener(service, listen_port, GATEWAY_START_SECONDS)
 
     def rail_requests(self) -> list[dict[str, object]]:
         """What the mock rail recorded, read from the rail container itself.
@@ -120,16 +153,24 @@ def stack() -> Stack:
     any of them fails, no case in this suite means anything and the whole
     session should stop.
 
-    `gateway` is started **best-effort**. While `CORE-S019` is incomplete it
-    cannot start at all, and waiting on it would abort the session — reporting
-    "the stack did not come up" for every case, including the network-isolation
-    ones that are perfectly testable without it.
+    `gateway` is started **best-effort**, then waited for with a deadline that
+    expiring is not an error. Both halves matter, and they are not the same
+    half.
 
-    Letting it fail per-case gives a far more useful signal. The isolation
+    Best-effort, because a gateway that refuses to start must not abort the
+    session: `--wait` would report "the stack did not come up" for every case,
+    including the network-isolation ones that are perfectly testable without it.
+    Letting it fail per-case gives a far more useful signal — the isolation
     results go green while `TestTheSuiteIsNotVacuous` stays red, which is the
     suite saying exactly the right thing: *the agent could not reach the rail,
     and you may not yet conclude anything from that, because I have not shown
     you it could reach anything at all.*
+
+    Waited for, because `up -d` returns before the listener is bound, and on a
+    cold build the vacuity guard would probe an address nothing was on yet — a
+    gate that flakes red, which teaches people to re-run gates until they go
+    green. That habit is a worse outcome than the failure the guard exists to
+    catch, so the race is removed rather than tolerated.
     """
     if not COMPOSE_FILE.exists():
         pytest.fail(
@@ -179,6 +220,7 @@ def stack() -> Stack:
 
     # Best-effort. Its absence is reported by the cases that need it.
     _compose("up", "-d", "--build", GATEWAY)
+    _wait_for_listener(GATEWAY, GATEWAY_LISTEN_PORT, GATEWAY_START_SECONDS)
 
     try:
         yield Stack()
