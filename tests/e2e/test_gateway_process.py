@@ -43,6 +43,7 @@ from secondsign.gateway.server import (
     main,
 )
 from tests.deployment.conftest import REFERENCE
+from tests.e2e.conftest import NO_SERVICE
 
 PRINCIPAL = "spiffe://secondsign.example/agent/reference"
 STRANGER_PRINCIPAL = "spiffe://secondsign.example/agent/stranger"
@@ -221,24 +222,6 @@ class TestAnAuthenticatedWorkload:
 
         assert response.status == 404
         assert json.loads(body) == {"refused": "unknown_path"}
-
-
-#: The three spellings of one fact: the handshake yielded no service.
-#:
-#: Under TLS 1.3 the server learns about the missing or untrusted certificate
-#: only after its own Finished flight, so it sends an alert and closes while the
-#: caller is still mid-exchange. Which error the caller sees is a race it does
-#: not get to pick: it reads the alert (`SSLError`), reads the close
-#: (`ConnectionResetError`), or loses even that and finds its own write hitting a
-#: closed socket (`BrokenPipeError`). CI's Linux runners reliably produce the
-#: second; macOS produces the first usually and the third about once in
-#: twenty-five runs.
-#:
-#: Named types, never `OSError`. The broad catch would also swallow
-#: `ConnectionRefusedError` — nothing listening at all — and this suite would
-#: then report "the gateway refused an anonymous caller" on a machine where the
-#: gateway never started.
-NO_SERVICE = (ssl.SSLError, ConnectionResetError, BrokenPipeError)
 
 
 class TestAnUnauthenticatedCaller:

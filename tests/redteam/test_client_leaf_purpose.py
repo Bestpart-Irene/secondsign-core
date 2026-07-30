@@ -50,6 +50,7 @@ from secondsign.gateway.server import (
     verify_client_purpose,
 )
 from tests.deployment.conftest import REFERENCE
+from tests.e2e.conftest import NO_SERVICE
 
 PRINCIPAL = "spiffe://secondsign.example/agent/reference"
 
@@ -244,9 +245,9 @@ def gateway(authority):
         thread.join(timeout=5)
 
 
-#: What a client gets when the handshake itself is refused. Named rather than
-#: widened to `OSError`: a connection that was never accepted and a gateway that
-#: never started are different facts, and only one of them is this test passing.
+#: What `_attempt` reports when the handshake yielded no service. Which of the
+#: three exceptions in `NO_SERVICE` arrives is a race the caller does not pick;
+#: that they all mean "refused before any request" is the assertion.
 HANDSHAKE_REFUSED = "handshake_refused"
 
 
@@ -268,7 +269,7 @@ def _attempt(authority: _Authority, gateway, name: str) -> str:
         response = connection.getresponse()
         payload = json.loads(response.read())
         return "ok" if response.status == 200 else str(payload["refused"])
-    except ssl.SSLError:
+    except NO_SERVICE:
         return HANDSHAKE_REFUSED
     finally:
         connection.close()

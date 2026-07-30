@@ -58,6 +58,17 @@ what the gateway dispatched. This is the only check that can catch a bypass that
 *worked*: asking the agent whether its attempt failed has a blind spot exactly
 where it matters.
 
+**A CA you can actually rotate.** `SECONDSIGN_CLIENT_CA` names a *bundle*, so
+the new CA is appended, agents re-enrol during the overlap, and the old CA is
+removed once nobody is behind it — no instant in which every agent must have
+already moved. A rotation that requires one is a rotation nobody performs, and a
+CA nobody rotates is the one that is still trusted years after the key it signs
+with should have been retired. The gateway also requires a client leaf to *be*
+one: `keyUsage` permitting signature and an `extendedKeyUsage` naming client
+authentication, both present. An unrestricted leaf is valid for every purpose
+under RFC 5280, so a CA that scopes nothing is a CA whose every certificate is a
+gateway credential.
+
 ## Why you should believe the demonstration
 
 Everything above is a **negative**, and negatives pass for boring reasons.
@@ -98,8 +109,13 @@ of far more than it establishes.
   container escape defeats all of this. That is accepted and unmitigated.
 - **There is no online revocation.** No CRL, no OCSP. A leaked certificate stays
   valid until it expires — 1 hour as deployed here, 24 hours being the maximum
-  the gateway will accept. Emergency response is removing the principal or CA
-  from the allowlist and reloading.
+  the gateway will accept. Emergency response is removing the principal from
+  `SECONDSIGN_CLIENT_ALLOWLIST`, or its CA from the bundle, and **restarting the
+  gateway**: both are read once at start-up, and there is no atomic-reload path
+  in this version. `tests/e2e/test_ca_rotation.py` drives that sequence and
+  asserts the withdrawn credential is refused while remaining, in itself,
+  perfectly valid — which is what a deployment without revocation has instead of
+  revocation.
 - **The agent container does hold a credential**: its own client private key. It
   must, or it could not authenticate. The suite asserts that key *is* present
   before asserting the gateway key, CA signing key and rail credential are not —
