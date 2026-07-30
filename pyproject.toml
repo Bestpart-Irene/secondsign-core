@@ -91,6 +91,17 @@ include = [
     # is skipped in silence — the certification would simply not exist inside
     # the published source distribution, and nothing would say so.
     "examples",
+    # The same failure one directory over, and louder: `tests/deployment` loads
+    # `deploy/reference/tls/generate.py` by path at import time, and
+    # `tests/client` loads it through that module. A missing script there does
+    # not skip a test — it raises during collection and interrupts the whole
+    # suite inside the artefact. `client` ships for the second half of the same
+    # reason: the client suite builds that distribution's wheel from source, so
+    # an sdist without it carries tests that cannot run. Neither directory is
+    # part of what `secondsign-core` installs; both are part of what its source
+    # distribution has to contain to be checkable.
+    "deploy",
+    "client",
     "docs",
     "tools",
     "README.md",
