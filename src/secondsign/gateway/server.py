@@ -48,6 +48,14 @@ nothing else — a request body that carries a principal is refused rather than
 ignored, because an accepted-and-ignored field is one a later change can
 quietly start honouring.
 
+Before any of that, the leaf must have been issued to be a client at all: a
+`keyUsage` permitting signature and an `extendedKeyUsage` naming client
+authentication, both present, read from the DER by
+:mod:`secondsign.gateway.leaf` because `getpeercert` reports neither. The
+handshake would already refuse extensions that are present and wrong; what this
+adds is that *absent* is not a pass, and that a purpose check is a condition
+this process states rather than one it inherits from a library default.
+
 The rail credential never enters this module's configuration object. It passes
 from the environment straight into the rail executor and stops there, so no
 repr, log line, or refusal detail can leak what this process was trusted with —
@@ -79,6 +87,7 @@ from secondsign.controlplane.window import WindowLedger
 from secondsign.decision import DecisionEngine
 from secondsign.gateway.authorization import AuthorizationService
 from secondsign.gateway.execution import ExecutionGateway, InMemoryIdempotencyStore
+from secondsign.gateway.leaf import read_client_purpose
 from secondsign.policy import AmountLimit, AmountWindowPolicy
 from secondsign.rails.http import HTTPRailExecutor
 
@@ -150,6 +159,9 @@ class PrincipalRefusalReason(StrEnum):
     malformed_identity = "malformed_identity"
     lifetime_beyond_cap = "lifetime_beyond_cap"
     unknown_principal = "unknown_principal"
+    unreadable_certificate = "unreadable_certificate"
+    not_for_client_authentication = "not_for_client_authentication"
+    key_not_for_signing = "key_not_for_signing"
 
 
 class PrincipalRefusal(BaseModel):
@@ -324,6 +336,34 @@ def build_ssl_context(
     return context
 
 
+def verify_client_purpose(der: bytes | None) -> PrincipalRefusal | None:
+    """Whether the peer's leaf was issued to be a client at all (ADR 0004 §4).
+
+    The chain check settles who signed the certificate; it does not settle what
+    the certificate is for. OpenSSL applies its `ssl_client` purpose while
+    verifying a peer, so a `keyUsage` or `extendedKeyUsage` that is present and
+    wrong already fails the handshake. What it does not do is treat *absence* as
+    a failure — an unrestricted leaf is good for every purpose under RFC 5280 —
+    and a CA that scopes nothing is a CA whose every leaf is a gateway
+    credential. This gateway therefore requires both extensions to be present
+    and to say so.
+
+    The two conditions OpenSSL happens to reach first are still checked here.
+    They are this process's conditions, and a later change to the listener's
+    context must not be able to drop them without a test going red.
+    """
+    if not der:
+        return PrincipalRefusal(reason=PrincipalRefusalReason.unreadable_certificate)
+    purpose = read_client_purpose(der)
+    if purpose is None:
+        return PrincipalRefusal(reason=PrincipalRefusalReason.unreadable_certificate)
+    if not purpose.client_auth:
+        return PrincipalRefusal(reason=PrincipalRefusalReason.not_for_client_authentication)
+    if not purpose.digital_signature:
+        return PrincipalRefusal(reason=PrincipalRefusalReason.key_not_for_signing)
+    return None
+
+
 def derive_principal(
     peercert: Mapping[str, object] | None, allowlist: frozenset[str]
 ) -> DerivedPrincipal | PrincipalRefusal:
@@ -396,7 +436,13 @@ class _RequestHandler(BaseHTTPRequestHandler):
         super().setup()
         if isinstance(self.connection, ssl.SSLSocket):
             allowlist = cast(_GatewayHTTPServer, self.server).allowlist
-            self.identity = derive_principal(self.connection.getpeercert(), allowlist)
+            # Purpose before identity: a leaf that was not issued for client
+            # authentication has no identity to derive, it has a misuse to
+            # report. Reading the SAN out of it first would name the workload
+            # whose credential is being presented for something it is not.
+            self.identity = verify_client_purpose(
+                self.connection.getpeercert(binary_form=True)
+            ) or derive_principal(self.connection.getpeercert(), allowlist)
         else:
             # Plaintext exists only on loopback, where the process boundary is
             # the authentication (ADR 0004 §5). There is no principal to derive

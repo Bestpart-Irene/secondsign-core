@@ -124,6 +124,24 @@ def build_ca(now: dt.datetime) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
     return key, cert
 
 
+#: What a TLS 1.3 leaf on either side of this connection actually does with its
+#: key: sign its own CertificateVerify. The gateway reads this bit and refuses a
+#: client leaf without it, so issuing it is not decoration — a leaf scoped to
+#: encipherment cannot authenticate, and the reference PKI states that rather
+#: than leaving the leaf unrestricted and therefore good for everything.
+_SIGNING = x509.KeyUsage(
+    digital_signature=True,
+    content_commitment=False,
+    key_encipherment=False,
+    data_encipherment=False,
+    key_agreement=False,
+    key_cert_sign=False,
+    crl_sign=False,
+    encipher_only=False,
+    decipher_only=False,
+)
+
+
 def build_leaf(
     *,
     common_name: str,
@@ -149,6 +167,7 @@ def build_leaf(
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(san, critical=False)
         .add_extension(eku, critical=False)
+        .add_extension(_SIGNING, critical=True)
         # Key identifiers, as on the CA: a strict verifier locates the issuer
         # by these rather than by name alone.
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
