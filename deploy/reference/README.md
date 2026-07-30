@@ -140,11 +140,13 @@ with the certificate identity model in
 
 ## Status
 
-`CORE-S019` is in progress, and the vertical path is closed: an agent in the
-agent container, holding a client certificate and no rail credential, proposes a
-payment through `secondsign-client`; the gateway authenticates it, decides it,
-dispatches it to the rail, and answers. The deployment suite, the sanctioned-path
-cases and the mutation check all run in CI.
+`CORE-S019` has built everything it declared, and the vertical path is closed:
+an agent in the agent container, holding a client certificate and no rail
+credential, proposes a payment through `secondsign-client`; the gateway
+authenticates it, decides it, dispatches it to the rail, and answers. The
+deployment suite, the sanctioned-path cases and the mutation check all run in
+CI. What the slice does *not* deliver is below — and it is a gap in the product,
+not an unmet acceptance criterion.
 
 The agent container now installs `secondsign-client` — and only that. `import
 secondsign.gateway` in there is a `ModuleNotFoundError`, executed by the suite
