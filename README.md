@@ -43,14 +43,20 @@ SecondSign answers it the same way every time.
 > can still move money, you have not installed a boundary — you have installed a
 > library it is free to skip.
 
-**Today, core does not yet pass its own test.** The deployment shape that makes
-it pass — a standalone gateway process holding the credentials, with the agent
-on the other side of a process boundary — is specified and queued as
-[`CORE-S019`](docs/slices/roadmap.yaml), not built. Run in-process, as it ships
-now, SecondSign is a control your own code chooses to route through: right for
-development and evaluation, not yet for production custody of money. The rest of
-this README describes what the engine does; [Status](#status) says how far the
-deployment story has actually got.
+**There is now a deployment that passes that test, and running core in-process
+still does not.** [`CORE-S019`](docs/slices/roadmap.yaml) builds the shape — a
+standalone gateway process holding the credentials, the agent on the other side
+of a process boundary with a client distribution that contains no rail code at
+all — and [`deploy/reference/`](deploy/reference/) is a two-network topology you
+can copy. CI stands it up, runs an adversarial suite *inside* the agent
+container written against the standard library rather than against the client,
+and then re-runs that suite against a deliberately joined topology and requires
+it to fail there, because a gate that cannot be made to fail is not evidence.
+
+Installed the other way — the library imported into your agent's process — it is
+still a control your own code chooses to route through, and the falsification
+test still fails. That is right for development and evaluation, and it is not
+production custody of money. [Status](#status) says what is left.
 
 ## What happens to a request
 
@@ -212,11 +218,17 @@ branch was executed by some test. It does not say the tests assert the right
 things, and it is not a substitute for the independent review this project has
 not yet had.
 
-**Not there yet:** the deployment shape that makes no-bypass real for you — a
-standalone gateway process with a control-plane store the agent cannot reach —
-plus a first-class agent-facing integration surface ([`CORE-S019`](docs/slices/roadmap.yaml)).
-Today, running the library inside your agent's process is right for development
-and testing, not for production custody of money.
+**Not there yet:** three things, named rather than rounded off.
+[`CORE-S019`](docs/slices/roadmap.yaml) has built the gateway process, the
+credential-free client distribution and the reference topology, so the
+no-bypass claim is now demonstrated by adversarial code rather than argued —
+but a policy that answers `REVIEW` has nothing behind it yet: no path presents a
+held payment to a human or carries an approval back. The control-plane state the
+gateway keeps (the principal fingerprint key, the spend window) lives in the
+process, so a restart forgets it. And spending limits are a constant in the
+gateway rather than state under an auditable authority. Running the library
+inside your agent's process remains right for development and testing, not for
+production custody of money.
 
 Where each queued slice actually stands, derived from Git rather than
 hand-maintained: [`docs/slices/STATUS.md`](docs/slices/STATUS.md).

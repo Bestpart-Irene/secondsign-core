@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from secondsign.contracts import ReasonCode
+from secondsign.contracts import Fingerprint, ReasonCode
 from secondsign.decision import DecisionVerdict
 from secondsign.gateway import ExecutionStatus
 from secondsign.intent import IntentDigest
@@ -42,6 +42,16 @@ class AuditReceipt(BaseModel):
     reasons: tuple[ReasonCode, ...] = ()
     outcome_status: ExecutionStatus | None = None
     approval_id: str | None = None
+    #: Which workload asked, as a keyed fingerprint — never the raw URI SAN the
+    #: certificate carried (ADR 0004 §1). The trail has to be able to answer
+    #: "who asked for this" without the trail itself becoming a directory of
+    #: workload identities, and the fingerprint key is control plane, so a reader
+    #: of the ledger alone cannot resolve one.
+    #:
+    #: Optional because a receipt can be recorded for an action that reached no
+    #: authenticated caller — an operator-run reconciliation, a test. A missing
+    #: value means "no principal", never "the principal was not recorded".
+    principal_ref: Fingerprint | None = None
     receipt_hash: str = Field(pattern=_HASH_PATTERN)
 
 
@@ -54,6 +64,7 @@ def _content_hash(
     reasons: tuple[ReasonCode, ...],
     outcome_status: ExecutionStatus | None,
     approval_id: str | None,
+    principal_ref: str | None,
 ) -> str:
     material = {
         "sequence": sequence,
@@ -64,6 +75,7 @@ def _content_hash(
         "reasons": [code.value for code in reasons],
         "outcome_status": outcome_status.value if outcome_status is not None else None,
         "approval_id": approval_id,
+        "principal_ref": principal_ref,
     }
     canonical = json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
@@ -79,6 +91,7 @@ def hash_of(receipt: AuditReceipt) -> str:
         reasons=receipt.reasons,
         outcome_status=receipt.outcome_status,
         approval_id=receipt.approval_id,
+        principal_ref=receipt.principal_ref,
     )
 
 

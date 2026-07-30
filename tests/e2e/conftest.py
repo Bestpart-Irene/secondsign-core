@@ -10,6 +10,7 @@ be exercised in CI without a network or a credential; the live rail is
 `test_stripe_live.py`.
 """
 
+import ssl
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -24,6 +25,27 @@ from secondsign.contracts import (
     SourceTrust,
 )
 from secondsign.intent import PaymentTargetKind, SettlementPriority
+
+#: The three spellings of one fact: the handshake yielded no service.
+#:
+#: Under TLS 1.3 the server learns about the missing or untrusted certificate
+#: only after its own Finished flight, so it sends an alert and closes while the
+#: caller is still mid-exchange. Which error the caller sees is a race it does
+#: not get to pick: it reads the alert (`SSLError`), reads the close
+#: (`ConnectionResetError`), or loses even that and finds its own write hitting a
+#: closed socket (`BrokenPipeError`). CI's Linux runners reliably produce the
+#: second; macOS produces the first usually and the third about once in
+#: twenty-five runs.
+#:
+#: Named types, never `OSError`. The broad catch would also swallow
+#: `ConnectionRefusedError` — nothing listening at all — and a suite using it
+#: would then report "the gateway refused an anonymous caller" on a machine
+#: where the gateway never started.
+#:
+#: Here rather than in one test module because three files now dial a gateway
+#: that will refuse them, and the reasoning above is the part that must not be
+#: re-derived — a second copy is where someone widens one of them to `OSError`.
+NO_SERVICE = (ssl.SSLError, ConnectionResetError, BrokenPipeError)
 
 _EPOCH = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
 NOT_AFTER = _EPOCH + timedelta(minutes=5)

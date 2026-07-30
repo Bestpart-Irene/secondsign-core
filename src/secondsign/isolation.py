@@ -102,6 +102,14 @@ CONTROL_PLANE_CONCERNS: Final[dict[str, Concern]] = {
         description="What may loosen a setting below its strictest default, and on whose authority.",
         symbols=("Relaxation", "RelaxationDecision", "resolve", "strictest"),
     ),
+    "fingerprint_key": Concern(
+        description=(
+            "What makes a reference opaque. Reachable means every reference in the "
+            "deployment is mintable, and an unkeyed hash of an account number is a "
+            "lookup table away from being the account number."
+        ),
+        symbols=("FingerprintKey",),
+    ),
 }
 
 #: The one module a managed agent imports. It carries a request and an outcome,

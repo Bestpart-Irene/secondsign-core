@@ -123,6 +123,43 @@ class TestTheTwoTriggers:
         assert not gates.decide([], [], "this branch carries no slice")["onchain"].run
 
 
+class TestTheDeploymentGateHasTheSameTwoTriggers:
+    """The containerised gate is conditional on the same terms as the Solidity
+    one, and for the same reason: it builds three images, and a change that
+    cannot affect what runs inside them should not pay for that."""
+
+    def test_a_changed_compose_topology_runs_it(self) -> None:
+        decision = gates.decide(
+            ["deploy/reference/compose.yaml"], [], "this branch carries no slice"
+        )["deployment"]
+
+        assert decision.run
+        assert "compose.yaml" in decision.reason
+
+    def test_a_changed_policy_module_runs_it_too(self) -> None:
+        """Wider than the gateway package on purpose: the gateway's answer is
+        the decision path's answer, so a policy change changes what the assembled
+        system asserts."""
+        assert gates.decide(
+            ["src/secondsign/policy/amount.py"], [], "this branch carries no slice"
+        )["deployment"].run
+
+    def test_a_declared_gate_runs_it_with_no_deployment_file_touched_yet(self) -> None:
+        decision = gates.decide(["docs/slices/roadmap.yaml"], ["deployment_topology"], "CORE-S019")[
+            "deployment"
+        ]
+
+        assert decision.run
+        assert "declares deployment_topology" in decision.reason
+
+    def test_a_documentation_change_skips_it(self) -> None:
+        assert not gates.decide(["README.md"], ["ruff_check"], "CORE-S005")["deployment"].run
+
+    def test_an_undeterminable_diff_runs_it(self) -> None:
+        """Not knowing and not needing it must not produce the same answer."""
+        assert gates.decide(None, [], "CORE-S019")["deployment"].run
+
+
 class TestReadingTheManifest:
     def test_a_housekeeping_branch_declares_no_gates(self) -> None:
         assert gates.manifest_gates("chore/bump-ruff") == ([], "this branch carries no slice")

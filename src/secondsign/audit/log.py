@@ -66,6 +66,7 @@ class AuditLog:
         reasons: tuple[ReasonCode, ...] = (),
         outcome_status: ExecutionStatus | None = None,
         approval_id: str | None = None,
+        principal_ref: str | None = None,
     ) -> AuditReceipt:
         entries = self._sink.entries()
         sequence = len(entries)
@@ -80,6 +81,7 @@ class AuditLog:
             reasons=reasons,
             outcome_status=outcome_status,
             approval_id=approval_id,
+            principal_ref=principal_ref,
         )
         receipt = AuditReceipt(
             sequence=sequence,
@@ -89,6 +91,7 @@ class AuditLog:
             reasons=reasons,
             outcome_status=outcome_status,
             approval_id=approval_id,
+            principal_ref=principal_ref,
             receipt_hash=receipt_hash,
         )
         # Fail-closed: if the ledger cannot persist this, the error propagates

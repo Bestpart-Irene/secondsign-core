@@ -123,6 +123,48 @@ def test_the_onchain_gates_and_test_category_are_declarable():
     assert "onchain_topology" in validator.KNOWN_TEST_CATEGORIES
 
 
+def test_the_deployment_topology_gate_and_category_are_declarable():
+    """CORE-S019 introduces a containerised topology gate; manifests must name it.
+
+    It is separate from `redteam` deliberately. A red-team case attacks the
+    engine from inside the test process, which means it assumes the very
+    environment the deployment gate exists to falsify — that the agent has no
+    route to the rail. A category that conflated the two would let a slice claim
+    topology coverage from a suite that never left the process.
+    """
+    assert "deployment_topology" in validator.KNOWN_GATES
+    assert "deployment_topology" in validator.KNOWN_TEST_CATEGORIES
+
+
+def test_an_unregistered_test_category_is_rejected(tmp_path):
+    """The queue must not be able to cite a gate that does not run.
+
+    This is the property that makes the registry worth having: a manifest naming
+    `container_escape_proof` would otherwise validate, and the slice would read
+    as covered by a suite nobody wrote.
+    """
+    manifest = tmp_path / "slice.yaml"
+    manifest.write_text(
+        "schema_version: 1\n"
+        "slices:\n"
+        "  - id: CORE-S999\n"
+        "    title: A slice naming a category nobody registered\n"
+        "    depends_on: []\n"
+        "    threats: []\n"
+        "    scope: ['docs/**']\n"
+        "    forbidden: []\n"
+        "    acceptance: ['it validates']\n"
+        "    required_tests: [not_a_real_category]\n"
+        "    gates: [pytest]\n"
+        "    stop_for_human: false\n",
+        encoding="utf-8",
+    )
+
+    problems = validator.validate(manifest)
+
+    assert any("not_a_real_category" in problem for problem in problems)
+
+
 def test_the_shipped_roadmap_validates():
     """The queue itself is the validator's first user."""
     assert validator.validate(REPO_ROOT / "docs" / "slices" / "roadmap.yaml") == []

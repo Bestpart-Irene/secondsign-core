@@ -52,6 +52,11 @@ dev = [
     "mypy==2.3.0",
     "pyyaml==6.0.3",
     "stripe==15.3.1",
+    # Generates the reference deployment's ephemeral PKI. Development only — it
+    # is not a runtime dependency and must never become one; `[project]` keeps
+    # exactly one, and the licence gate inspects the built wheel rather than the
+    # CI environment precisely so this distinction stays real.
+    "cryptography==49.0.0",
     # `tests/packaging/test_sdist.py` builds a real source distribution rather
     # than reading the include list, because the list is not the artefact. Both
     # are dev dependencies so the build runs with `--no-isolation`: a test that
@@ -86,6 +91,17 @@ include = [
     # is skipped in silence — the certification would simply not exist inside
     # the published source distribution, and nothing would say so.
     "examples",
+    # The same failure one directory over, and louder: `tests/deployment` loads
+    # `deploy/reference/tls/generate.py` by path at import time, and
+    # `tests/client` loads it through that module. A missing script there does
+    # not skip a test — it raises during collection and interrupts the whole
+    # suite inside the artefact. `client` ships for the second half of the same
+    # reason: the client suite builds that distribution's wheel from source, so
+    # an sdist without it carries tests that cannot run. Neither directory is
+    # part of what `secondsign-core` installs; both are part of what its source
+    # distribution has to contain to be checkable.
+    "deploy",
+    "client",
     "docs",
     "tools",
     "README.md",
@@ -111,7 +127,22 @@ include = [
 # the normal test suite — an example that ships a certification nobody executes
 # would rot the moment the surface it certifies against moved.
 testpaths = ["tests", "examples"]
-addopts = "-q"
+# `deployment` is deselected by default because it needs Docker and a built
+# reference stack, which no contributor should have to install to run the unit
+# suite. It is not optional, though — it is its own CI gate (`deployment_topology`),
+# and there it runs with `-m deployment` and fails rather than skips when Docker
+# is missing. Deselected-by-default and skipped-when-unavailable are different
+# things: the first is a choice about which gate you are running, the second is a
+# gate reporting green having verified nothing.
+addopts = "-q -m 'not deployment and not deployment_mutation'"
+markers = [
+    "deployment: runs against the containerised reference deployment (CORE-S019)",
+    # Its own marker rather than a second `deployment` case, because it stands up
+    # a second stack and because it is not a gate: it is the evidence that the
+    # deployment gate is one. `-m deployment` must not pick it up, and neither
+    # must the default run.
+    "deployment_mutation: requires the deployment gate to fail against a joined topology (CORE-S019)",
+]
 
 [tool.coverage.run]
 source = ["secondsign"]

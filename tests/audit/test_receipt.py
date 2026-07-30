@@ -90,6 +90,7 @@ def test_receipt_carries_only_redacted_references():
         "reasons",
         "outcome_status",
         "approval_id",
+        "principal_ref",
         "receipt_hash",
     }
     assert all(isinstance(code, ReasonCode) for code in receipt.reasons)

@@ -81,6 +81,22 @@ CONDITIONAL = (
         paths=("onchain/",),
         manifest_gates=("forge_fmt", "forge_test"),
     ),
+    Conditional(
+        job="deployment",
+        # Wider than it looks, deliberately. The deployment gate asserts a
+        # property of an *assembled system*, so anything that changes what runs
+        # in one of those containers changes what it is asserting — the gateway
+        # process, the client the agent container installs, the compose topology
+        # and the suite itself. `src/secondsign/` whole rather than the gateway
+        # package alone, because the gateway's answer is the decision path's.
+        paths=(
+            "deploy/",
+            "src/secondsign/",
+            "client/",
+            "tests/deployment/",
+        ),
+        manifest_gates=("deployment_topology",),
+    ),
 )
 
 #: Jobs that run for every change. Listed so `verify` fails when one is missing

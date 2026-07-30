@@ -1,0 +1,23 @@
+SecondSign Core
+Copyright 2026 SecondSign contributors
+
+This product is licensed under the Apache License, Version 2.0 (the
+"License"); see the LICENSE file for the full terms.
+
+-------------------------------------------------------------------------------
+Attributions
+-------------------------------------------------------------------------------
+
+Portions of SecondSign's design and, in places, its wording derive from
+Doberman-Core, an Apache-2.0 licensed project:
+
+    Doberman-Core — https://github.com/fu351/Doberman-Core
+    Copyright the Doberman-Core contributors (maintainer: Alan Fu, @fu351)
+    Licensed under the Apache License, Version 2.0
+
+Specifically, SecondSign reuses architectural patterns established in
+Doberman-Core — the raise-only / monotone combination of guardrail verdicts,
+the fail-closed isolated-plugin runner, and the frozen redaction-safe data
+models — and a small number of explanatory code comments adapted closely from
+that project. SecondSign is an independent reimplementation for the financial
+authorization domain, not a fork; it shares no Git history with Doberman-Core.

@@ -57,6 +57,11 @@ KNOWN_GATES = {
     "dco",
     "forge_fmt",
     "forge_test",
+    # CORE-S019. Stands up the two-network reference deployment and runs the
+    # adversarial suite inside the agent container. Separate from `pytest`
+    # because it proves something the in-repo suite structurally cannot: that a
+    # process which is not cooperating still cannot reach the rail.
+    "deployment_topology",
 }
 KNOWN_TEST_CATEGORIES = {
     "unit",
@@ -67,6 +72,11 @@ KNOWN_TEST_CATEGORIES = {
     "redteam",
     "e2e",
     "onchain_topology",
+    # CORE-S019. Adversarial code, standard library only, run inside the agent
+    # container of the reference deployment. Distinct from `redteam`, which
+    # attacks the engine from inside the test process and therefore assumes the
+    # very environment this category exists to falsify.
+    "deployment_topology",
 }
 
 ID_PATTERN = re.compile(r"^[A-Z]+-S\d{3}$")
