@@ -329,6 +329,13 @@ slices:
       - tests/tooling/**
       - pyproject.toml
       - .github/workflows/**
+      # README.md: this slice's acceptance criteria constrain what the
+      # documentation may claim, and the README carried two statements that
+      # this slice makes false — that the deployment shape is "not built", and
+      # that it is what is missing. Merging with either standing would leave
+      # the front page of a public repository describing a version of the
+      # project that no longer exists.
+      - README.md
     forbidden:
       - a rail credential reachable from the managed agent's process
       - a network route from the managed agent to the rail that does not pass through the gateway
