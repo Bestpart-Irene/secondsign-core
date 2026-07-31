@@ -264,6 +264,78 @@ class TestTheIdempotencyNamespaceIsNotTheAgentsToChoose:
         assert second.status is AgentOutcomeStatus.completed
         assert len(executor.dispatched) == 1, "a retried proposal was executed twice"
 
+    def test_a_retry_one_second_later_is_the_same_proposal(self) -> None:
+        """The clock is not part of the proposal.
+
+        The case above passes the same `now` twice, which is the one condition
+        under which the intent digests match — `complete_intent` derives the
+        validity window from `now`, so in a running process every retry lands on
+        a different digest and is refused as a *different proposal*. A retry an
+        agent actually makes is a second later, not in the same microsecond.
+        """
+        executor = RecordingExecutor()
+        service = build_service(executor=executor)
+        request = make_request()
+
+        first = service.authorize(ALICE, request, now=NOW)
+        second = service.authorize(ALICE, request, now=NOW + timedelta(seconds=1))
+
+        assert first.status is AgentOutcomeStatus.completed
+        assert second.status is AgentOutcomeStatus.completed, (
+            "an identical proposal re-sent under the same handle was refused as a "
+            "different one — the reservation binds a digest that contains the clock"
+        )
+        assert len(executor.dispatched) == 1
+
+    def test_a_retry_does_not_consume_the_window_twice(self) -> None:
+        """One dispatch, one deduction.
+
+        The retry is de-duplicated at the idempotency store, which hands back
+        the recorded outcome — and the service then records that outcome's value
+        against the trailing window a second time. It fails closed, so it hides:
+        the agent simply has less limit than it spent. The third request is what
+        makes the difference observable, and it is sized so that it fits under
+        one deduction and not under two.
+        """
+        executor = RecordingExecutor()
+        service = build_service(executor=executor, max_aggregate_minor=8_500)
+        request = make_request(amount_minor=4_200)
+
+        service.authorize(ALICE, request, now=NOW)
+        service.authorize(ALICE, request, now=NOW)
+        outcome = service.authorize(
+            ALICE, make_request(amount_minor=1_000, request_ref=FP_A), now=NOW
+        )
+
+        assert len(executor.dispatched) == 2
+        assert outcome.status is AgentOutcomeStatus.completed, (
+            "4,200 was deducted twice for one dispatch, so 4,200 + 1,000 read as "
+            "9,400 against a limit of 8,500"
+        )
+
+    def test_a_retry_is_answered_from_the_record_rather_than_re_decided(self) -> None:
+        """An agent asking "did that go through?" must not be told a new answer.
+
+        Re-deciding a settled action asks the policy a question whose answer has
+        already changed *because of that action*: the first dispatch is in the
+        trailing window, so the second evaluation sees its own spend and denies.
+        The agent is told `refused` for a payment that completed — the one
+        answer that is neither true nor safe to act on.
+        """
+        executor = RecordingExecutor()
+        service = build_service(executor=executor, max_aggregate_minor=5_000)
+        request = make_request(amount_minor=4_200)
+
+        first = service.authorize(ALICE, request, now=NOW)
+        second = service.authorize(ALICE, request, now=NOW)
+
+        assert first.status is AgentOutcomeStatus.completed
+        assert second.status is AgentOutcomeStatus.completed, (
+            "the retry was re-decided against a window its own dispatch had "
+            "already filled, so a completed payment read as refused"
+        )
+        assert len(executor.dispatched) == 1
+
     def test_two_principals_choosing_the_same_handle_do_not_collide(self) -> None:
         """The red-team case the manifest names: one workload must not be able
         to consume or block another's reservation by choosing its request_ref."""
