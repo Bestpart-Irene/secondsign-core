@@ -38,6 +38,7 @@ from secondsign.intent import (
     SettlementPriority,
     TransactionIntent,
     compute_digest,
+    compute_proposal_digest,
 )
 from secondsign.policy import (
     AggregateKey,
@@ -96,11 +97,27 @@ def allow_decision(intent: TransactionIntent) -> Decision:
 
 
 def grant_for(intent: TransactionIntent, approval_id: str = "appr-rt") -> Grant:
-    return Grant(approval_id=approval_id, digest=compute_digest(intent), checker=CHECKER)
+    return Grant(approval_id=approval_id, proposal=compute_proposal_digest(intent), checker=CHECKER)
+
+
+def pending_for(mc, intent: TransactionIntent, *, approval_id: str = "a1", expires_at=None):
+    """A held review for ``intent``, bound to its proposal digest."""
+    return mc.request(
+        review_decision(intent),
+        MAKER,
+        approval_id=approval_id,
+        proposal=compute_proposal_digest(intent),
+        expires_at=expires_at,
+    )
 
 
 def verdict_for(pending, checker: CheckerIdentity = CHECKER) -> CheckerVerdict:
-    return CheckerVerdict(checker=checker, digest=pending.digest, approved=True)
+    return CheckerVerdict(
+        checker=checker,
+        approval_id=pending.approval_id,
+        proposal=pending.proposal,
+        approved=True,
+    )
 
 
 class CountingExecutor:

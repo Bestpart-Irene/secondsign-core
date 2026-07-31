@@ -4,13 +4,13 @@
 
 A provider is the channel that shows a pending approval to a human checker and
 returns their verdict. The one guarantee it cannot be allowed to break is that
-the verdict binds to the digest it was shown (B3) — approving a substitute must
+the verdict binds to the proposal it was shown (B3) — approving a substitute must
 be impossible. The suite checks that; the negative test proves it bites.
 """
 
 from secondsign.approval import CheckerVerdict, PendingApproval
 from secondsign.conformance import ApprovalProviderConformance
-from secondsign.intent import IntentDigest
+from secondsign.intent import ProposalDigest
 from tests.approval.conftest import CHECKER, AutoApproveProvider, make_pending
 
 
@@ -23,10 +23,15 @@ class TestAutoApproveProviderConformance(ApprovalProviderConformance):
 
 
 class _DigestSubstitutingProvider:
-    """Approves, but against a digest it was never shown — the B3 violation."""
+    """Approves, but against a proposal it was never shown — the B3 violation."""
 
     def present(self, pending: PendingApproval) -> CheckerVerdict:
-        return CheckerVerdict(checker=CHECKER, digest=IntentDigest(value="0" * 64), approved=True)
+        return CheckerVerdict(
+            checker=CHECKER,
+            approval_id=pending.approval_id,
+            proposal=ProposalDigest(value="0" * 64),
+            approved=True,
+        )
 
 
 def _assert_raises(fn) -> None:

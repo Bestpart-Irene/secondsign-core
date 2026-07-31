@@ -12,7 +12,7 @@ from datetime import timedelta
 
 from secondsign.approval import CheckerIdentity, CheckerVerdict, Grant, Rejected, RejectionReason
 from secondsign.gateway import ExecutionOutcome, GatewayRefusal, RefusalReason
-from secondsign.intent import IntentDigest, compute_digest
+from secondsign.intent import ProposalDigest, compute_digest
 from tests.redteam.conftest import (
     CHECKER,
     MAKER,
@@ -23,6 +23,7 @@ from tests.redteam.conftest import (
     grant_for,
     make_intent,
     new_maker_checker,
+    pending_for,
     review_decision,
     verdict_for,
 )
@@ -48,7 +49,7 @@ def test_consuming_a_maker_checker_approval_twice_grants_once():
     """B2. The one-shot approval itself cannot be consumed a second time."""
     intent = make_intent()
     mc = new_maker_checker()
-    pending = mc.request(review_decision(intent), MAKER, approval_id="a1", expires_at=NOT_AFTER)
+    pending = pending_for(mc, intent, expires_at=NOT_AFTER)
     first = mc.consume(pending, verdict_for(pending), now=NOW)
     second = mc.consume(pending, verdict_for(pending), now=NOW)
     assert isinstance(first, Grant)
@@ -84,7 +85,7 @@ def test_an_expired_approval_cannot_be_consumed():
     """B2. A late consume is refused; the TTL is not advisory."""
     intent = make_intent()
     mc = new_maker_checker()
-    pending = mc.request(review_decision(intent), MAKER, approval_id="a1", expires_at=NOT_AFTER)
+    pending = pending_for(mc, intent, expires_at=NOT_AFTER)
     too_late = NOT_AFTER + timedelta(seconds=1)
     assert mc.consume(pending, verdict_for(pending), now=too_late) == Rejected(
         reason=RejectionReason.expired
@@ -95,7 +96,7 @@ def test_a_missing_expiry_is_treated_as_expired():
     """B2. An approval with no expiry is dead, not permanent."""
     intent = make_intent()
     mc = new_maker_checker()
-    pending = mc.request(review_decision(intent), MAKER, approval_id="a1", expires_at=None)
+    pending = pending_for(mc, intent, expires_at=None)
     assert mc.consume(pending, verdict_for(pending), now=NOW) == Rejected(
         reason=RejectionReason.expired
     )
@@ -105,9 +106,12 @@ def test_the_maker_cannot_approve_their_own_request():
     """B6. Separation of duties: the checker's subject may not be the maker's."""
     intent = make_intent()
     mc = new_maker_checker()
-    pending = mc.request(review_decision(intent), MAKER, approval_id="a1", expires_at=NOT_AFTER)
+    pending = pending_for(mc, intent, expires_at=NOT_AFTER)
     self_verdict = CheckerVerdict(
-        checker=CheckerIdentity(subject=MAKER.subject), digest=pending.digest, approved=True
+        checker=CheckerIdentity(subject=MAKER.subject),
+        approval_id=pending.approval_id,
+        proposal=pending.proposal,
+        approved=True,
     )
     assert mc.consume(pending, self_verdict, now=NOW) == Rejected(
         reason=RejectionReason.self_approval
@@ -115,9 +119,9 @@ def test_the_maker_cannot_approve_their_own_request():
 
 
 def test_a_forged_grant_for_an_unapproved_review_is_refused():
-    """B3. A fabricated grant whose digest does not match is refused at dispatch."""
+    """B3. A fabricated grant whose proposal does not match is refused at dispatch."""
     intent = make_intent()
-    forged = Grant(approval_id="forged", digest=IntentDigest(value="f" * 64), checker=CHECKER)
+    forged = Grant(approval_id="forged", proposal=ProposalDigest(value="f" * 64), checker=CHECKER)
     executor = CountingExecutor()
     outcome = fresh_gateway(executor).execute(
         intent, review_decision(intent), grant=forged, now=NOW
