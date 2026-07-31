@@ -13,11 +13,12 @@ it, or when a complete slice depends on it. It is **ready** when every
 dependency is complete and it is not. It is **blocked** otherwise. ⚑ marks a
 slice that stops for a human before it is marked done.
 
-## Ready to pick up (3)
+## Ready to pick up (4)
 
 | Slice | Title | Waiting on |
 |---|---|---|
 | `CORE-S018` ⚑ | Extension health and a declared degraded state | — |
+| `CORE-S022` ⚑ | Carry a REVIEW verdict to a human and back, and execute what was approved | — |
 | `ONCHAIN-S001` ⚑ | Falsify or confirm the double-guard topology on a local chain | — |
 | `ONCHAIN-S002` | Candidate on-chain verdict types behind an unfrozen version constant | — |
 
