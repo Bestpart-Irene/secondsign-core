@@ -513,6 +513,19 @@ slices:
       - docs/decisions/**
       - docs/slices/roadmap.yaml
       - docs/slices/STATUS.md
+      # Widened before the implementation, deliberately. What an approval binds
+      # to is not private to the approval package: `ApprovalProviderConformance`
+      # certifies that a provider's verdict binds to the digest it was shown, so
+      # changing which digest that is changes the published extension contract
+      # and the suite that enforces it. Leaving the kit out of scope would mean
+      # either shipping a certification that asserts the old binding, or
+      # renaming a published field without touching the document that describes
+      # it. `tests/e2e/**` follows for the narrower reason that its fixtures
+      # construct a CheckerVerdict directly.
+      - src/secondsign/conformance/**
+      - tests/conformance/**
+      - tests/e2e/**
+      - docs/EXTENSION_CONTRACTS.md
     forbidden:
       - an approval that authorises a proposal whose material fields differ from the one shown
       - re-deciding on the agent's behalf and calling the result the same approval
