@@ -226,9 +226,10 @@ lint-imports
 python tools/validate_slice.py docs/slices/roadmap.yaml
 python tools/check_slice_scope.py
 python tools/render_roadmap.py --check
+python tools/check_doc_links.py
 ```
 
-The last three, plus the sign-off check and a comparison against `main`, are
+The three slice tools, plus the sign-off check and a comparison against `main`, are
 what `python tools/contributor_check.py` runs in one pass — the same scripts,
 invoked rather than reimplemented, with the fix command printed beside each
 failure. It deliberately does not wrap `ruff`, `mypy` or `pytest`: those explain
