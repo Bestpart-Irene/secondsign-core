@@ -198,7 +198,38 @@ source_modules = ["secondsign.agent"]
 forbidden_modules = [
     "secondsign.approval",
     "secondsign.audit",
+    "secondsign.conformance",
     "secondsign.controlplane",
+    "secondsign.decision",
+    "secondsign.gateway",
+    "secondsign.policy",
+    "secondsign.rails",
+]
+
+# The third side of the classification, enforced since CORE-S024 (issue #58).
+# `shared` means safe for both sides, and for two of the three sides that was a
+# gate while for this one it was a docstring. The realistic breach is quiet: a
+# shared module that pulls in the control plane stays green until somebody
+# imports it agent-side, and the violation then surfaces in a pull request
+# that did not create it. Sources are the shared prefixes; the architecture
+# suite derives the same list from `secondsign.isolation` so a new shared
+# prefix is covered there the moment it exists, and this contract is the
+# fail-fast one-line half of the pair.
+[[tool.importlinter.contracts]]
+name = "Shared modules must not reach the control plane (INV-12)"
+type = "forbidden"
+source_modules = [
+    "secondsign.adapters",
+    "secondsign.contracts",
+    "secondsign.intent",
+    "secondsign.isolation",
+]
+forbidden_modules = [
+    "secondsign.approval",
+    "secondsign.audit",
+    "secondsign.conformance",
+    "secondsign.controlplane",
+    "secondsign.decision",
     "secondsign.gateway",
     "secondsign.policy",
     "secondsign.rails",

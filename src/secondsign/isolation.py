@@ -119,25 +119,43 @@ AGENT_SURFACE: Final[str] = "secondsign.agent"
 #: Module prefixes that hold control-plane assets. Prefix rather than exact name
 #: so a package and its submodules are classified together — a new file under
 #: `controlplane/` is control plane the moment it exists, without an edit here.
+#:
+#: Two entries are here because of what they *reach*, not what they hold, and
+#: the reasoning belongs beside the classification (CORE-S024, issue #58):
+#:
+#: - `conformance` certifies extensions on both sides of the boundary, so its
+#:   kits import the approval and audit packages by construction. A kit runs in
+#:   a test harness on a developer's machine, never inside a managed agent —
+#:   classifying it control plane means an agent that imports it fails the
+#:   gate, which is the correct outcome.
+#: - `decision` reads the limits (`PolicyContext`) to decide. The deciding half
+#:   of the control plane is the control plane; what is safe for both sides is
+#:   the contract it serves, not the engine that serves it.
 _CONTROL_PLANE_PREFIXES: Final[tuple[str, ...]] = (
     "secondsign.approval",
     "secondsign.audit",
+    "secondsign.conformance",
     "secondsign.controlplane",
+    "secondsign.decision",
     "secondsign.gateway",
     "secondsign.policy",
     "secondsign.rails",
 )
 
 #: Prefixes that are safe for both sides: frozen boundary models, the plugin
-#: contract, the digest, and the conformance kit that certifies extensions.
+#: contract, and the digest. Since CORE-S024 this list is a *checked claim*,
+#: not a comment — every module under these prefixes must have an import
+#: closure free of control-plane modules, enforced by
+#: `tests/architecture/test_shared_side_isolation.py` and by the shared-side
+#: import contract in `pyproject.toml`. (`secondsign.redteam` was listed here
+#: from CORE-S016 to CORE-S024, but no such module exists — the red-team
+#: matrix lives under `tests/redteam/` — and a phantom entry in a checked
+#: claim is unfalsifiable, so it is gone.)
 _SHARED_PREFIXES: Final[tuple[str, ...]] = (
     "secondsign.adapters",
-    "secondsign.conformance",
     "secondsign.contracts",
-    "secondsign.decision",
     "secondsign.intent",
     "secondsign.isolation",
-    "secondsign.redteam",
 )
 
 
