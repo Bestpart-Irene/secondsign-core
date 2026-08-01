@@ -81,6 +81,12 @@ jobs:
       - name: Slice manifests
         run: python tools/validate_slice.py docs/slices/roadmap.yaml
 
+      # Relative links only, and no fetching: a gate that depends on someone
+      # else's uptime fails for reasons unrelated to this repository, and gets
+      # switched off within a month.
+      - name: Documentation links resolve
+        run: python tools/check_doc_links.py
+
       # STATUS.md is derived from the roadmap and from Git, and committed only so
       # it renders on GitHub. Checking it here is what keeps it a derived artefact
       # instead of a second place the project's status has to be maintained — and
