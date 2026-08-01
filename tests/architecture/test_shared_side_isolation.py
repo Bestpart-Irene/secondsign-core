@@ -101,7 +101,15 @@ def shared_side_breaches(package_root: Path) -> dict[str, list[str]]:
     module_set = frozenset(modules)
     breaches: dict[str, list[str]] = {}
     for module in modules:
-        if classify(module) is not Side.shared:
+        # Equality, not identity: `test_inv12_classification_reads_no_environment`
+        # reloads `secondsign.isolation` mid-suite, after which the old
+        # `classify` returns members of a *new* `Side` class — `is` against a
+        # member captured at import time is then false for every module, the
+        # shared list comes back empty, and these checks pass by having
+        # nothing to check. `Side` is a StrEnum, so equality holds across the
+        # reload. Found because the mutation tests below went green-blind in
+        # the full suite while passing alone.
+        if classify(module) != Side.shared:
             continue
         tainted = sorted(
             m for m in _closure(package_root, module, module_set) if is_control_plane(m)
@@ -111,7 +119,7 @@ def shared_side_breaches(package_root: Path) -> dict[str, list[str]]:
     return breaches
 
 
-SHARED_MODULES = [m for m in _modules_under(REAL_PACKAGE_ROOT) if classify(m) is Side.shared]
+SHARED_MODULES = [m for m in _modules_under(REAL_PACKAGE_ROOT) if classify(m) == Side.shared]
 
 
 # --------------------------------------------------------------------------
@@ -189,9 +197,7 @@ def test_the_check_catches_a_transitive_control_plane_import(tmp_path):
     it must indict every shared module that reaches it — proving the walk is
     a closure and not a glance at direct imports.
     """
-    copy_root = _mutated_copy(
-        tmp_path, "secondsign.intent.dimensions", "import secondsign.audit"
-    )
+    copy_root = _mutated_copy(tmp_path, "secondsign.intent.dimensions", "import secondsign.audit")
     breaches = shared_side_breaches(copy_root)
     assert "secondsign.intent" in breaches
     assert "secondsign.adapters" in breaches, (
