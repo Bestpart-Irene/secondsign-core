@@ -5,4 +5,4 @@
 # The single source of truth for the released version; pyproject reads it from
 # here (`[tool.hatch.version]`), so a tag, a wheel and `secondsign.__version__`
 # can never disagree.
-__version__ = "0.1.0"
+__version__ = "0.2.0"
