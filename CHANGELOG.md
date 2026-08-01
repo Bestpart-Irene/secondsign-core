@@ -19,6 +19,87 @@ guarantee will never appear as a bare bullet — it requires an ADR under
 Nothing released yet from this section. What is queued, and what is available to
 pick up, is in [`docs/slices/STATUS.md`](docs/slices/STATUS.md).
 
+## [0.2.0] — 2026-08-01
+
+The release that closes 0.1.0's first known limitation: the process boundary
+now exists. An agent holds a client certificate and no rail credential; the
+gateway holds the credential and the decision. The property "the agent cannot
+reach the rail" is now something a deployment inherits from the shipped
+topology and CI falsifies on purpose, rather than a convention the reader is
+asked to keep.
+
+Pre-1.0 surface changes in this release: the wire contract (`WIRE_VERSION = 1`)
+is new; `AuditReceipt` gained `principal_ref`. The plugin contract surface
+(`secondsign.contracts`, `CONTRACT_VERSION = 1`) is unchanged.
+
+### Added
+
+- **Standalone gateway process** (`secondsign.gateway.server`, `CORE-S019`).
+  mTLS termination against a private CA, the client principal read from the
+  certificate's single URI SAN and never from the body, and a seven-condition
+  bind check where a failed condition — or an unrecognised `SECONDSIGN_*`
+  setting — refuses to start. `/authorize` decides end to end: authenticate,
+  decide, dispatch, answer, with the rail's ledger growing by exactly one.
+- **`secondsign-client`**, a second distribution under [`client/`](client/):
+  the agent-side half of the boundary, pydantic-only, carrying no gateway, no
+  policy, no credential handling — asserted against the built wheel. Wire
+  version mismatch is a refusal in all four directions, and every transport
+  failure reads `refused` by type.
+- **Reference deployment** ([`deploy/reference/`](deploy/reference/)): a
+  Compose topology in which the agent container has no route to the rail, plus
+  a CI gate that is itself falsified — `compose.joined.yaml` adds the one line
+  that breaks isolation, and the build requires the real isolation tests to go
+  red against it.
+- **Wire conformance kit** (`WireClientConformance`): certifies a third-party
+  agent-side client through a three-line adapter, against a probe gateway that
+  can produce the malformed answers the real one cannot be asked for, with 19
+  deliberately non-conformant candidates the kit must catch.
+- **Control-plane pieces** behind the gateway: `controlplane.fingerprint`
+  (INV-12's fifth asset as a real object), `controlplane.window` (the
+  trailing-window spend ledger), and `rails.http` (2xx success, 4xx failure,
+  everything else unknown).
+- A worked example of a policy plugin certified by the conformance kit
+  ([#49](https://github.com/Bestpart-Irene/secondsign-core/pull/49), external
+  contribution).
+- Malformed `Fingerprint` values are now explained without echoing the
+  identifier (`CORE-S021`,
+  [#44](https://github.com/Bestpart-Irene/secondsign-core/pull/44), external
+  contribution).
+
+### Changed
+
+- **[security]** What the wire does not say closes strictest: provenance is
+  untrusted, the beneficiary is new, cross-border is true — the dimensions an
+  injected agent would most like to choose are not read from the request, and
+  the one claim the wire does carry may only tighten the decision. What wire
+  v1 cannot express is refused, not approximated.
+- **[security]** An indeterminate dispatch reads `refused` to the agent while
+  the receipt records `unknown` — and it consumes the spending window, so an
+  ambiguous first answer cannot be spent twice.
+- **[security]** A leaf certificate that scoped nothing was good for
+  everything: under RFC 5280 a leaf with no `keyUsage` and no
+  `extendedKeyUsage` is unrestricted, so the gateway now reads both extensions
+  from the DER and refuses their absence; the reference PKI issues
+  `digitalSignature` leaves with RFC 5280 key identifiers. Found by test
+  before release, fixed with no new runtime dependency.
+- CI is now fronted by a single required **`CI gate`** (`tools/ci_gates.py`)
+  that decides and verifies that every conditional job ran or was skipped for
+  a recorded reason — a skipped job can no longer read as a green one.
+- Release supply chain: every workflow action is pinned to a commit SHA, and
+  release artefacts carry signed build provenance verifiable with
+  `gh attestation verify`.
+- The sdist now ships `deploy/` and `client/`, so the test suite is
+  self-sufficient from the sdist alone.
+
+### Known limitations
+
+- **A `REVIEW` verdict is still a slower refusal.** The maker-checker flow
+  that carries a review to a human and back is built and under review as
+  `CORE-S022`; the approver's own channel is `CORE-S023`. Until both land, the
+  reference deployment deliberately sets no review threshold.
+- **One shipped policy**, unchanged from 0.1.0.
+- **No independent security review**, unchanged from 0.1.0.
+
 ## [0.1.0] — 2026-07-25
 
 First public release. The whole decision path, end to end, with each guarantee
@@ -81,5 +162,6 @@ bound to the test that enforces it in
 - **No independent security review.** The invariants are bound to tests and the
   red-team matrix is executed, but nobody outside the project has audited it.
 
-[Unreleased]: https://github.com/Bestpart-Irene/secondsign-core/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Bestpart-Irene/secondsign-core/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Bestpart-Irene/secondsign-core/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Bestpart-Irene/secondsign-core/releases/tag/v0.1.0
