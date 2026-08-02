@@ -122,12 +122,21 @@ class Relaxation(BaseModel):
         return self.expires_at is not None and now < self.expires_at
 
     def authorises(self, setting: Setting, value: int, now: datetime) -> bool:
-        """True only if this record permits exactly ``value`` for ``setting`` now."""
+        """True only if this record permits ``value`` for ``setting`` now.
+
+        The approved ``relaxed_to`` is a ceiling on *looseness*, in the
+        setting's own direction — not a bigger-is-looser threshold. A request
+        looser than what was approved is refused; one at or tighter than it is
+        within the ceiling. For `window_lookback_seconds`, where smaller is
+        looser, that means a record approving 43_200 (12h) does not authorise
+        60 (a near-total forgetting), which the old ``value <= relaxed_to`` let
+        through.
+        """
         if self.setting is not setting:
             return False
         if not self.is_live(now):
             return False
-        return value <= self.relaxed_to
+        return not is_looser_than(setting, value, self.relaxed_to)
 
 
 class RelaxationDecision(BaseModel):
@@ -172,18 +181,35 @@ def strictest(setting: Setting) -> int:
     return _STRICTEST[setting]
 
 
-def is_looser(setting: Setting, value: int) -> bool:
-    """Whether ``value`` is weaker than ``setting``'s strictest default.
+def is_looser_than(setting: Setting, value: int, reference: int) -> bool:
+    """Whether ``value`` is looser than ``reference`` in ``setting``'s direction.
 
-    Public because the direction is part of the contract and is *not* guessable
-    from the number: a *longer* TTL is looser, and a *shorter* lookback window is
-    looser, because forgetting more past activity makes the aggregate a limit is
-    measured against smaller. A caller — or a test — that assumes "bigger is
-    looser" is wrong for half of these settings.
+    The direction is part of the contract and is *not* guessable from the
+    number: a *longer* TTL is looser, and a *shorter* lookback window is looser,
+    because forgetting more past activity makes the aggregate a limit is measured
+    against smaller. Every looseness comparison in this module goes through here,
+    so `authorises` (is a request within an approved ceiling), `is_looser` (is a
+    value weaker than the default) and the authority selection (which sufficient
+    record is least loose) cannot disagree about which way is looser.
     """
     if setting is Setting.window_lookback_seconds:
-        return value < _STRICTEST[setting]
-    return value > _STRICTEST[setting]
+        return value < reference
+    return value > reference
+
+
+def is_looser(setting: Setting, value: int) -> bool:
+    """Whether ``value`` is weaker than ``setting``'s strictest default."""
+    return is_looser_than(setting, value, _STRICTEST[setting])
+
+
+def _looseness(setting: Setting, value: int) -> int:
+    """A number that increases with looseness, whatever the setting's direction.
+
+    Sorting sufficient records by this and taking the minimum names the
+    least-loose (narrowest) authority: for a bigger-is-looser setting that is
+    ``value`` itself; for lookback, where smaller is looser, it is ``-value``.
+    """
+    return -value if setting is Setting.window_lookback_seconds else value
 
 
 def resolve(
@@ -210,8 +236,15 @@ def resolve(
     if permitting:
         # The narrowest sufficient record, so a broad old exception does not
         # outrank a narrow deliberate one and the decision names the authority
-        # actually relied on. Ties break on the approver handle, for determinism.
-        authority = min(permitting, key=lambda record: (record.relaxed_to, record.approver_ref))
+        # actually relied on. "Narrowest" is least-loose in the setting's own
+        # direction: for TTL the smallest relaxed_to, for lookback the largest.
+        # `_looseness` maps both to one increasing-with-looseness number so the
+        # `min` picks the least-loose record regardless of direction. Ties break
+        # on the approver handle, for determinism.
+        authority = min(
+            permitting,
+            key=lambda record: (_looseness(setting, record.relaxed_to), record.approver_ref),
+        )
         return RelaxationDecision(
             setting=setting,
             value=requested,
