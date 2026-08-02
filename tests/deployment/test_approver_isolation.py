@@ -22,13 +22,7 @@ import json
 
 import pytest
 
-from tests.deployment.conftest import (
-    AGENT,
-    APPROVER,
-    APPROVER_ADDRESS,
-    APPROVER_PORT,
-    Stack,
-)
+from tests.deployment.conftest import AGENT, APPROVER, APPROVER_PORT, Stack
 from tests.deployment.test_reference_topology import (
     _AUTHORIZE,
     GATEWAY_HOST,
@@ -60,7 +54,7 @@ def _console(stack: Stack, *argv: str) -> dict[str, object]:
         "python",
         "/approver/console.py",
         argv[0],
-        APPROVER_ADDRESS,
+        stack.approver_address,
         str(APPROVER_PORT),
         *argv[1:],
     )
@@ -75,7 +69,7 @@ def _console(stack: Stack, *argv: str) -> dict[str, object]:
 class TestTheSuiteIsNotVacuous:
     def test_the_approver_can_reach_the_second_door(self, stack: Stack) -> None:
         """Before believing the agent cannot connect, show that something can."""
-        verdict = stack.probe(APPROVER, APPROVER_ADDRESS, APPROVER_PORT)
+        verdict = stack.probe(APPROVER, stack.approver_address, APPROVER_PORT)
         assert verdict["connected"] is True, (
             f"the approver container cannot reach the approver listener: {verdict} — "
             "nothing below may be concluded from the agent failing to"
@@ -86,7 +80,7 @@ class TestTheAgentHasNoRouteToTheApproverChannel:
     def test_the_approver_address_is_unroutable_from_the_agent(self, stack: Stack) -> None:
         """The claim itself: no interface on approvernet means no route to the
         address the second door lives on."""
-        verdict = stack.probe(AGENT, APPROVER_ADDRESS, APPROVER_PORT)
+        verdict = stack.probe(AGENT, stack.approver_address, APPROVER_PORT)
         assert verdict["connected"] is False, (
             "the agent connected to the approver listener — the second door "
             f"is on the agent's network: {verdict}"

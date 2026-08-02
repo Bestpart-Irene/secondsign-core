@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from tests.deployment import test_approver_isolation as approver_suite
-from tests.deployment.conftest import AGENT, APPROVER_ADDRESS, APPROVER_PORT, Stack
+from tests.deployment.conftest import AGENT, APPROVER_PORT, Stack
 
 pytestmark = pytest.mark.deployment_mutation
 
@@ -34,7 +34,9 @@ class TestTheApproverGateCanFail:
     ) -> None:
         """First, the mutation is verified to have taken effect — concluded
         from a route that now exists, not from the overlay file's presence."""
-        verdict = approver_joined_stack.probe(AGENT, APPROVER_ADDRESS, APPROVER_PORT)
+        verdict = approver_joined_stack.probe(
+            AGENT, approver_joined_stack.approver_address, APPROVER_PORT
+        )
         assert verdict["connected"] is True, (
             f"the joined topology did not grant the agent a route to the "
             f"approver listener: {verdict} — the mutation never took effect, "

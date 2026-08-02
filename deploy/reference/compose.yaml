@@ -73,7 +73,10 @@ services:
       agentnet: {}
       railnet: {}
       approvernet:
-        ipv4_address: 172.28.99.10
+        # Interpolated so a second stack (the mutation suites stand up two at
+        # once) can move the whole subnet instead of colliding with this one.
+        # An operator never sets these; the default is the deployment.
+        ipv4_address: ${SECONDSIGN_APPROVERNET_GATEWAY:-172.28.99.10}
     depends_on:
       rail: {condition: service_healthy}
     volumes:
@@ -99,7 +102,7 @@ services:
       # anchor, its own population. Configuring it is also what turns on the
       # review band — a deployment that can park an action for a human must
       # hold a door a human can answer through.
-      SECONDSIGN_APPROVER_BIND: "172.28.99.10:8788"
+      SECONDSIGN_APPROVER_BIND: "${SECONDSIGN_APPROVERNET_GATEWAY:-172.28.99.10}:8788"
       SECONDSIGN_APPROVER_TLS_CERT: /etc/secondsign/tls/approver-cert.pem
       SECONDSIGN_APPROVER_TLS_KEY: /etc/secondsign/tls/approver-key.pem
       SECONDSIGN_APPROVER_CA: /etc/secondsign/tls/approver-ca-cert.pem
@@ -160,4 +163,4 @@ networks:
     internal: true
     ipam:
       config:
-        - subnet: "172.28.99.0/24"
+        - subnet: "${SECONDSIGN_APPROVERNET_SUBNET:-172.28.99.0/24}"
