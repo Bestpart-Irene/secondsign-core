@@ -37,6 +37,30 @@ The adversarial suite that interrogates this deployment is
 pytest -m deployment
 ```
 
+## The demo
+
+The same topology, watched from three places at once:
+
+```bash
+python tls/generate.py
+docker compose -f compose.yaml -f compose.demo.yaml up --build -d
+
+# the approver panel, in your browser
+open http://127.0.0.1:8090
+
+python demo/run_demo.py     # the agent: $42 auto-allowed, $300 parked, $900 refused
+python demo/watch.py        # the rail's ledger, live
+```
+
+[`compose.demo.yaml`](compose.demo.yaml) changes one container: the approver
+runs [`approver/panel.py`](approver/panel.py) — a standard-library page that
+holds the checker credential *inside the container* and proxies exactly the
+channel's two verbs to your browser over the host's loopback. The overlay
+gives that container a route to your browser and is therefore not the
+reference topology; the isolation suites run against `compose.yaml` alone,
+and nothing about the agent or the rail changes in demo mode. Do not deploy
+the overlay; it exists to be watched.
+
 ## What it demonstrates
 
 **Network isolation.** Hostile code inside the agent container, written against

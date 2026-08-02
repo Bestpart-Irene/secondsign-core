@@ -1,0 +1,31 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The demo overlay: the reference topology, plus a browser for the human.
+#
+#     docker compose -f compose.yaml -f compose.demo.yaml up --build
+#
+# It changes exactly one container. The approver runs `panel.py` instead of
+# sleeping, and gains two things the reference topology deliberately does not
+# have: a port published to the HOST'S LOOPBACK so your browser can reach the
+# panel, and an interface on a non-internal network so that publishing works.
+#
+# Say what that costs, because the reference topology's whole point is what is
+# absent: in demo mode the approver container has a route off its internal
+# network. The agent and rail keep every property the isolation suites assert
+# — those suites run against compose.yaml alone and never against this file —
+# and the checker credential still never leaves the approver container; the
+# browser sees the panel, never the channel. Do not deploy this overlay; it
+# exists to be watched.
+
+services:
+  approver:
+    command: ["python", "/approver/panel.py"]
+    networks: [approvernet, panelnet]
+    ports:
+      - "127.0.0.1:8090:8090"
+
+networks:
+  # Not internal: the one concession, scoped to the demo, so the panel port
+  # can reach your browser.
+  panelnet: {}
