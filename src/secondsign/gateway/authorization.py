@@ -64,6 +64,7 @@ lets the window have moved while nothing else did (ADR 0005).
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -305,6 +306,22 @@ class AuthorizationService:
         self._pending = pending if pending is not None else InMemoryPendingStore()
         self._maker_checker = maker_checker if maker_checker is not None else MakerChecker()
         self._reservations: dict[str, _Reservation] = {}
+        # The gateway process serves on threads (`ThreadingHTTPServer`), so one
+        # service answers many requests at once. Deciding reads the spend window
+        # and dispatching records back to it, and between those two the window
+        # must not move: two proposals that both read "nothing spent" and both
+        # dispatch would each be within the cap while their sum is not. The
+        # reservation guards a *repeat* of one handle; nothing but this guards
+        # the window against *distinct* handles arriving together. Reentrant
+        # because the resolve path re-enters through the same helpers.
+        #
+        # It is held across dispatch on purpose. The reference stores are
+        # in-memory (INV-12 / CORE-S017), so the window and the reservation are
+        # this process's memory and the only correct place to serialise them is
+        # here; a distributed control plane enforces the same invariant with a
+        # conditional write on the durable store instead, and would hold no
+        # process-local lock across rail I/O.
+        self._lock = threading.RLock()
 
     def authorize(
         self, principal: str, request: AuthorizationRequest, *, now: datetime
@@ -325,37 +342,42 @@ class AuthorizationService:
             return self._refuse(reservation_key, now)
 
         proposal = compute_proposal_digest(intent)
-        held = self._reservations.get(reservation_key)
-        if held is not None:
-            if held.proposal != proposal:
-                # The same handle, a different proposal. Answering with the
-                # first outcome would tell the agent something happened to
-                # *this* request that did not; executing would honour a handle
-                # that is already spent. Refusing is the only true statement.
-                return self._refuse(reservation_key, now, digest=compute_digest(intent))
-            # The same proposal again. Repeat the answer rather than deciding
-            # again: the state the policy would read now includes this action's
-            # own effect, so a second decision answers a different question.
-            return held.answer
+        with self._lock:
+            held = self._reservations.get(reservation_key)
+            if held is not None:
+                if held.proposal != proposal:
+                    # The same handle, a different proposal. Answering with the
+                    # first outcome would tell the agent something happened to
+                    # *this* request that did not; executing would honour a
+                    # handle that is already spent. Refusing is the only true
+                    # statement.
+                    return self._refuse(reservation_key, now, digest=compute_digest(intent))
+                # The same proposal again. Repeat the answer rather than deciding
+                # again: the state the policy would read now includes this
+                # action's own effect, so a second decision answers a different
+                # question.
+                return held.answer
 
-        decision = self._decide(intent, now=now)
-        if decision.verdict is DecisionVerdict.REVIEW:
-            return self._hold(
-                request,
-                intent,
-                decision,
-                proposal,
-                reservation_key=reservation_key,
-                principal_ref=principal_ref,
-                now=now,
-            )
-        if decision.verdict is not DecisionVerdict.ALLOW:
+            decision = self._decide(intent, now=now)
+            if decision.verdict is DecisionVerdict.REVIEW:
+                return self._hold(
+                    request,
+                    intent,
+                    decision,
+                    proposal,
+                    reservation_key=reservation_key,
+                    principal_ref=principal_ref,
+                    now=now,
+                )
+            if decision.verdict is not DecisionVerdict.ALLOW:
+                return self._settle(
+                    reservation_key, proposal, decision, principal_ref, now, outcome=None
+                )
+
+            result = self._dispatch(intent, decision, now=now)
             return self._settle(
-                reservation_key, proposal, decision, principal_ref, now, outcome=None
+                reservation_key, proposal, decision, principal_ref, now, outcome=result
             )
-
-        result = self._dispatch(intent, decision, now=now)
-        return self._settle(reservation_key, proposal, decision, principal_ref, now, outcome=result)
 
     def open_reviews(self) -> tuple[PendingReview, ...]:
         """Every review waiting for a human.
@@ -377,60 +399,69 @@ class AuthorizationService:
         filled up refuses the action without burning the human's answer. Only
         then is the one-shot spent, and only then does anything dispatch.
         """
-        review = self._pending.get(approval_id)
-        if review is None:
-            return ReviewResolution(
-                status=ReviewOutcomeStatus.rejected,
-                reason=RejectionReason.unknown_approval,
+        with self._lock:
+            # Same window as `authorize`, and the same reason it is held across
+            # dispatch: re-deciding reads the spend window, and two answers to
+            # two reviews arriving together must not each see the other's spend
+            # as absent. The one-shot consume also has to be atomic with the
+            # get/release around it, or two calls answering one review could
+            # both pass `get` before either releases.
+            review = self._pending.get(approval_id)
+            if review is None:
+                return ReviewResolution(
+                    status=ReviewOutcomeStatus.rejected,
+                    reason=RejectionReason.unknown_approval,
+                )
+
+            intent = complete_intent(
+                review.request, idempotency_key=review.reservation_key, now=now
             )
+            proposal = compute_proposal_digest(intent)
+            if proposal != review.approval.proposal:
+                # Belt and braces: re-completion is deterministic in everything
+                # but the window, so this cannot differ unless the completion
+                # logic itself changed under a running deployment. It is checked
+                # because it is the whole guarantee and it costs a comparison.
+                return ReviewResolution(
+                    status=ReviewOutcomeStatus.rejected,
+                    reason=RejectionReason.digest_mismatch,
+                )
 
-        intent = complete_intent(review.request, idempotency_key=review.reservation_key, now=now)
-        proposal = compute_proposal_digest(intent)
-        if proposal != review.approval.proposal:
-            # Belt and braces: re-completion is deterministic in everything but
-            # the window, so this cannot differ unless the completion logic
-            # itself changed under a running deployment. It is checked because
-            # it is the whole guarantee and it costs a comparison.
-            return ReviewResolution(
-                status=ReviewOutcomeStatus.rejected,
-                reason=RejectionReason.digest_mismatch,
+            decision = self._decide(intent, now=now)
+            if decision.verdict is DecisionVerdict.DENY:
+                # Policy state moved while the human was thinking. An approval is
+                # not a permission slip that outranks a limit — and the answer is
+                # not spent, so it still executes once the window drains.
+                self._audit.record(
+                    digest=decision.digest,
+                    verdict=decision.verdict,
+                    reasons=decision.reasons,
+                    outcome_status=None,
+                    principal_ref=review.principal_ref,
+                )
+                return ReviewResolution(status=ReviewOutcomeStatus.refused)
+
+            consumed = self._maker_checker.consume(review.approval, verdict, now=now)
+            if isinstance(consumed, Rejected):
+                return ReviewResolution(status=ReviewOutcomeStatus.rejected, reason=consumed.reason)
+
+            result = self._dispatch(intent, decision, now=now, grant=consumed)
+            outcome = self._settle(
+                review.reservation_key,
+                proposal,
+                decision,
+                review.principal_ref,
+                now,
+                outcome=result,
+                approval_id=consumed.approval_id,
             )
-
-        decision = self._decide(intent, now=now)
-        if decision.verdict is DecisionVerdict.DENY:
-            # Policy state moved while the human was thinking. An approval is
-            # not a permission slip that outranks a limit — and the answer is
-            # not spent, so it still executes once the window drains.
-            self._audit.record(
-                digest=decision.digest,
-                verdict=decision.verdict,
-                reasons=decision.reasons,
-                outcome_status=None,
-                principal_ref=review.principal_ref,
+            self._pending.release(approval_id)
+            status = (
+                ReviewOutcomeStatus.executed
+                if outcome.status is AgentOutcomeStatus.completed
+                else ReviewOutcomeStatus.refused
             )
-            return ReviewResolution(status=ReviewOutcomeStatus.refused)
-
-        consumed = self._maker_checker.consume(review.approval, verdict, now=now)
-        if isinstance(consumed, Rejected):
-            return ReviewResolution(status=ReviewOutcomeStatus.rejected, reason=consumed.reason)
-
-        result = self._dispatch(intent, decision, now=now, grant=consumed)
-        outcome = self._settle(
-            review.reservation_key,
-            proposal,
-            decision,
-            review.principal_ref,
-            now,
-            outcome=result,
-            approval_id=consumed.approval_id,
-        )
-        self._pending.release(approval_id)
-        status = (
-            ReviewOutcomeStatus.executed
-            if outcome.status is AgentOutcomeStatus.completed
-            else ReviewOutcomeStatus.refused
-        )
-        return ReviewResolution(status=status, outcome=outcome)
+            return ReviewResolution(status=status, outcome=outcome)
 
     def _decide(self, intent: TransactionIntent, *, now: datetime) -> Decision:
         aggregate = self._ledger.aggregate(AggregateKey.from_intent(intent), now=now)
