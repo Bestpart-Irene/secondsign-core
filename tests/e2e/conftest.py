@@ -99,7 +99,12 @@ class LargePaymentReviewPolicy:
 
 
 def approve(pending) -> CheckerVerdict:
-    return CheckerVerdict(checker=CHECKER, digest=pending.digest, approved=True)
+    return CheckerVerdict(
+        checker=CHECKER,
+        approval_id=pending.approval_id,
+        proposal=pending.proposal,
+        approved=True,
+    )
 
 
 class FakeStripe:

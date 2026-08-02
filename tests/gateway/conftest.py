@@ -19,6 +19,7 @@ from secondsign.intent import (
     SettlementPriority,
     TransactionIntent,
     compute_digest,
+    compute_proposal_digest,
 )
 
 _EPOCH = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
@@ -60,7 +61,7 @@ def make_decision(intent: TransactionIntent, verdict: DecisionVerdict) -> Decisi
 
 
 def make_grant(intent: TransactionIntent) -> Grant:
-    return Grant(approval_id="appr-1", digest=compute_digest(intent), checker=CHECKER)
+    return Grant(approval_id="appr-1", proposal=compute_proposal_digest(intent), checker=CHECKER)
 
 
 class FixedExecutor:

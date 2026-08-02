@@ -48,6 +48,13 @@ KEY_BYTES: Final[int] = 32
 #: confirmed by comparing it against a reference the agent already holds.
 PRINCIPAL_DOMAIN: Final[str] = "principal"
 DECISION_DOMAIN: Final[str] = "decision"
+#: An open review's handle. Keyed, so an agent cannot compute the id of its own
+#: pending approval and cannot enumerate anyone else's.
+APPROVAL_DOMAIN: Final[str] = "approval"
+#: The maker of a review. The workload that proposed an action is its maker, and
+#: it appears as a fingerprint for the same reason every other identity does —
+#: an approval record is not a place to write down who an agent is.
+MAKER_DOMAIN: Final[str] = "maker"
 
 
 class FingerprintKey:

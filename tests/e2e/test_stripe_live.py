@@ -27,6 +27,7 @@ from secondsign.gateway import (
     ExecutionStatus,
     InMemoryIdempotencyStore,
 )
+from secondsign.intent import compute_proposal_digest
 from secondsign.policy import (
     AggregateKey,
     AmountLimit,
@@ -74,7 +75,13 @@ def test_live_test_mode_payment_is_held_approved_and_released():
     assert decision.verdict is DecisionVerdict.REVIEW  # held
 
     mc = new_maker_checker()
-    pending = mc.request(decision, MAKER, approval_id="appr-live-1", expires_at=NOT_AFTER)
+    pending = mc.request(
+        decision,
+        MAKER,
+        approval_id="appr-live-1",
+        proposal=compute_proposal_digest(intent),
+        expires_at=NOT_AFTER,
+    )
     grant = mc.consume(pending, approve(pending), now=NOW)
     assert isinstance(grant, Grant)  # approved
 

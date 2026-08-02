@@ -17,7 +17,9 @@ agent- or plugin-facing model — is what these assert.
 from secondsign.adapters import StripeCall, ToolCall
 from secondsign.approval import PendingApproval
 from secondsign.contracts import Finding, PluginJudgement, PolicyView
+from secondsign.controlplane.pending import PendingReview
 from secondsign.intent import TransactionIntent
+from secondsign.isolation import is_control_plane
 from secondsign.policy import PolicyContext, WindowAggregate
 
 #: Field-name fragments that would mean control-plane material had leaked onto a
@@ -85,6 +87,19 @@ def test_the_pending_approval_names_no_roster():
     """B6-adjacent: an approval carries the maker and a digest, not the set of
     who could approve — an agent cannot enumerate approvers from it."""
     _assert_no_control_plane_fields(PendingApproval)
+
+
+def test_a_held_review_is_on_the_control_plane_side_by_where_it_lives():
+    """INV-12 by prefix, not by an entry in a list.
+
+    `secondsign.controlplane.pending` holds the queue of reviews waiting for a
+    human. Nothing was added to `isolation.py` to classify it — the module is on
+    the protected side because of where the file is, which is the property that
+    survives somebody adding the next control-plane module without reading this
+    test.
+    """
+    assert is_control_plane(PendingReview.__module__)
+    _assert_no_control_plane_fields(PendingReview)
 
 
 def test_the_idempotency_key_is_not_a_view_the_agent_can_read():

@@ -11,6 +11,10 @@ actually be spent.
   decision was made on, plus its authorisation — never a fresh amount, target,
   or account a caller could substitute. The digest is recomputed and compared
   immediately before dispatch; a mismatch is refused.
+- **Only the approved proposal** (B3). A `REVIEW` needs a grant, and the grant's
+  proposal digest is recomputed from the intent about to be dispatched. The
+  approval does not cover the validity window — a human cannot answer inside one
+  (ADR 0005) — so the window is allowed to have moved and nothing else is.
 - **Still in its window** (B5). The validity window is re-verified against the
   clock at dispatch; past it, the action must be re-decided, not just re-run.
 - **Reserved before executed** (B2). The idempotency key is reserved *before*
@@ -31,8 +35,14 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
 
+from secondsign.approval import Grant
 from secondsign.decision import Decision, DecisionVerdict
-from secondsign.intent import IntentDigest, TransactionIntent, compute_digest
+from secondsign.intent import (
+    IntentDigest,
+    TransactionIntent,
+    compute_digest,
+    compute_proposal_digest,
+)
 
 
 class ExecutionStatus(StrEnum):
@@ -133,7 +143,7 @@ class ExecutionGateway:
         intent: TransactionIntent,
         decision: Decision,
         *,
-        grant: object = None,
+        grant: Grant | None = None,
         now: datetime,
     ) -> ExecutionOutcome | GatewayRefusal:
         # Integrity: the executed value must equal the decided value (B1).
@@ -145,8 +155,11 @@ class ExecutionGateway:
         if decision.verdict is DecisionVerdict.DENY:
             return GatewayRefusal(reason=RefusalReason.denied)
         if decision.verdict is DecisionVerdict.REVIEW:
-            grant_digest = getattr(grant, "digest", None)
-            if grant_digest != decision.digest:
+            # Recomputed from the intent in hand rather than taken from the
+            # decision: what must match is what is about to be dispatched, and a
+            # comparison against a value that travelled with the decision would
+            # be checking the caller's arithmetic instead of the payment's.
+            if grant is None or grant.proposal != compute_proposal_digest(intent):
                 return GatewayRefusal(reason=RefusalReason.not_approved)
 
         # Still within its window (B5): over it, the action is re-decided.

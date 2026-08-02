@@ -24,7 +24,7 @@ from secondsign.gateway import (
     ExecutionStatus,
     InMemoryIdempotencyStore,
 )
-from secondsign.intent import compute_digest
+from secondsign.intent import compute_digest, compute_proposal_digest
 from secondsign.policy import (
     AggregateKey,
     AmountLimit,
@@ -82,9 +82,17 @@ def test_a_payment_is_held_approved_and_released_with_a_linked_receipt():
     decision = _review_engine().decide(intent, _under_cap_context(intent))
     assert decision.verdict is DecisionVerdict.REVIEW
 
-    # APPROVED: a distinct human checker consumes a one-shot, digest-bound approval.
+    # APPROVED: a distinct human checker consumes a one-shot, proposal-bound
+    # approval — bound to every material field except the validity window, so a
+    # human answering after the window closed still holds a usable answer.
     mc = new_maker_checker()
-    pending = mc.request(decision, MAKER, approval_id="appr-e2e-1", expires_at=NOT_AFTER)
+    pending = mc.request(
+        decision,
+        MAKER,
+        approval_id="appr-e2e-1",
+        proposal=compute_proposal_digest(intent),
+        expires_at=NOT_AFTER,
+    )
     grant = mc.consume(pending, approve(pending), now=NOW)
     assert isinstance(grant, Grant)
 
