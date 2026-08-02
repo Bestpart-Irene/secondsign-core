@@ -136,6 +136,34 @@ Availability is not something a client may soften. With the gateway down,
 authorization is *impossible*, and the honest place to surface that is operator
 health signals.
 
+## What an approval provider answers about
+
+A provider is handed a `PendingApproval` and returns a `CheckerVerdict`. The
+verdict binds to the pending approval twice, and both bindings are checked by
+`ApprovalProviderConformance`:
+
+| Binding | Why |
+|---|---|
+| `proposal` — the `ProposalDigest` it was shown | B3 — a provider cannot approve a substitute for the content it displayed |
+| `approval_id` — the approval it was shown | B3 — and it cannot move one human's answer to a different open approval |
+
+**The binding is a `ProposalDigest`, not an `IntentDigest`, and the difference is
+the point.** An intent digest covers every material field *including the
+validity window*, which is five minutes long. A human answering after that has
+an approval that can never be spent, and re-deciding to obtain a fresh window
+produces a digest nobody approved. So the approval binds to every material field
+**except** `not_before` and `not_after`, execution stays bound to the intent
+digest, and the sentence a deployment can rely on is: *the window is not part of
+what a human approves; every other field is.* [ADR 0005](decisions/0005-an-approval-binds-to-a-proposal-not-to-a-window.md)
+records the alternatives and why each is worse.
+
+Two consequences for a provider author. Render from the `PendingApproval` you
+were given, never from a copy assembled elsewhere — that is what makes "the
+reviewer saw what executed" checkable rather than asserted. And expect an
+approved action to still be refused: the decision is re-made at approval time
+against live policy state, because an approval is not a permission slip that
+outranks a limit.
+
 ## Available and forthcoming
 
 | Extension point | Suite | Status |

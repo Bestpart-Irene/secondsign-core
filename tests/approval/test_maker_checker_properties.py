@@ -4,7 +4,7 @@
 
 For every subject, clock and digest: a one-shot approval grants at most once, an
 expired or missing-expiry approval never grants, a self-approval never grants,
-and a mismatched digest never grants.
+and a mismatched proposal never grants.
 """
 
 from datetime import timedelta
@@ -13,7 +13,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from secondsign.approval import CheckerIdentity, CheckerVerdict, Grant, MakerIdentity
-from secondsign.intent import IntentDigest
+from secondsign.intent import ProposalDigest
 from tests.approval.conftest import (
     EXPIRES_AT,
     NOW,
@@ -48,7 +48,10 @@ def test_self_approval_never_grants(maker_subject):
     mc = fresh_maker_checker()
     pending = make_pending(maker=MakerIdentity(subject=maker_subject))
     verdict = CheckerVerdict(
-        checker=CheckerIdentity(subject=maker_subject), digest=pending.digest, approved=True
+        checker=CheckerIdentity(subject=maker_subject),
+        approval_id=pending.approval_id,
+        proposal=pending.proposal,
+        approved=True,
     )
     assert not isinstance(mc.consume(pending, verdict, now=NOW), Grant)
 
@@ -57,11 +60,12 @@ def test_self_approval_never_grants(maker_subject):
 def test_mismatched_digest_never_grants(value):
     mc = fresh_maker_checker()
     pending = make_pending()
-    if value == pending.digest.value:
+    if value == pending.proposal.value:
         return
     verdict = CheckerVerdict(
         checker=CheckerIdentity(subject="bob"),
-        digest=IntentDigest(value=value),
+        approval_id=pending.approval_id,
+        proposal=ProposalDigest(value=value),
         approved=True,
     )
     assert not isinstance(mc.consume(pending, verdict, now=NOW), Grant)

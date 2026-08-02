@@ -17,10 +17,16 @@ supplying a provider plus a corpus of pending approvals:
         pending_corpus = (a_pending, another_pending)
 
 The guarantee it certifies is the one a substitution attack would break: the
-verdict a provider returns binds to the digest of the pending approval it was
-shown, and names a checker of the distinct checker type (B3, B6). A provider may
-approve or reject as its human decides — what it may not do is approve a digest
-it was never shown.
+verdict a provider returns binds to the pending approval it was shown — both its
+**proposal digest** and its **approval id** — and names a checker of the
+distinct checker type (B3, B6). A provider may approve or reject as its human
+decides. What it may not do is approve content it was never shown, or move an
+answer from one open approval to another.
+
+The binding is a `ProposalDigest`, not an `IntentDigest`: what a human approves
+is every material field except the validity window, because a human answering
+after the window has closed would otherwise hold an approval that can never be
+spent (ADR 0005).
 
 Like the other kits, this imports no test framework; the methods are plain
 assertions pytest collects from the subclass.
@@ -69,9 +75,16 @@ class ApprovalProviderConformance:
     def test_verdict_binds_to_the_presented_digest(self):
         """B3 — a provider cannot approve a substitute for what it was shown."""
         for pending, verdict in self._verdicts():
-            assert verdict.digest == pending.digest, (
-                "provider returned a verdict bound to a different digest than the "
+            assert verdict.proposal == pending.proposal, (
+                "provider returned a verdict bound to a different proposal than the "
                 "pending approval it was shown — a substitution channel"
+            )
+
+    def test_verdict_names_the_approval_it_answers(self):
+        """B3 — and it cannot move an answer between two open approvals."""
+        for pending, verdict in self._verdicts():
+            assert verdict.approval_id == pending.approval_id, (
+                "provider returned a verdict naming a different approval than the one it was shown"
             )
 
     def test_checker_is_the_distinct_checker_type(self):

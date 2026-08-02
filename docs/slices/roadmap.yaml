@@ -486,6 +486,124 @@ slices:
     gates: [ruff_check, ruff_format, pytest, lint_imports]
     stop_for_human: false
 
+  - id: CORE-S022
+    title: Carry a REVIEW verdict to a human and back, and execute what was approved
+    depends_on: [CORE-S019]
+    threats: [B2, B3, B5, B6]
+    # `src/secondsign/intent/**` is in scope because the guarantee this slice
+    # adds is a second digest, and a digest is a property of the intent rather
+    # than of the approval that quotes it. `src/secondsign/policy/**` is in
+    # scope for a duller reason: no policy in this repository can return REVIEW
+    # today, so without one the branch this slice exists to wire has nothing
+    # that reaches it and every test of it would be a fixture arguing with
+    # itself.
+    scope:
+      - src/secondsign/intent/**
+      - src/secondsign/policy/**
+      - src/secondsign/approval/**
+      - src/secondsign/controlplane/**
+      - src/secondsign/gateway/**
+      - tests/intent/**
+      - tests/policy/**
+      - tests/approval/**
+      - tests/gateway/**
+      - tests/architecture/**
+      - tests/redteam/**
+      - docs/INVARIANTS.md
+      - docs/decisions/**
+      - docs/slices/roadmap.yaml
+      - docs/slices/STATUS.md
+      # Widened before the implementation, deliberately. What an approval binds
+      # to is not private to the approval package: `ApprovalProviderConformance`
+      # certifies that a provider's verdict binds to the digest it was shown, so
+      # changing which digest that is changes the published extension contract
+      # and the suite that enforces it. Leaving the kit out of scope would mean
+      # either shipping a certification that asserts the old binding, or
+      # renaming a published field without touching the document that describes
+      # it. `tests/e2e/**` follows for the narrower reason that its fixtures
+      # construct a CheckerVerdict directly.
+      - src/secondsign/conformance/**
+      - tests/conformance/**
+      - tests/e2e/**
+      - docs/EXTENSION_CONTRACTS.md
+    forbidden:
+      - an approval that authorises a proposal whose material fields differ from the one shown
+      - re-deciding on the agent's behalf and calling the result the same approval
+      - a pending review the managed agent can read, list, create, cancel or approve
+      - a second consume of one approval producing a second dispatch
+      - a re-sent proposal consuming the trailing window a second time
+      - a re-sent proposal being re-decided, so that the answer depends on when the agent asked
+      - an approval whose expiry is absent, or longer than the deployment's stated review TTL
+      - widening the wire: a new endpoint, a new status, a new field, or a WIRE_VERSION change
+      - the proposal digest and the intent digest being interchangeable values
+      - a checker identity derivable from a client certificate or from any agent-supplied field
+      - free text from the agent reaching whatever renders the proposal to the human
+    acceptance:
+      # The digest question this slice exists to settle. A human's approval
+      # cannot bind to the intent digest, because the validity window is inside
+      # it and the window has moved by the time a human answers.
+      - a proposal digest covers every material field of an intent except not_before and not_after, asserted by a test that iterates the model's fields rather than listing them
+      - the proposal digest and the intent digest of the same intent differ, and neither validates where the other is expected
+      - a test asserts the window fields the proposal digest excludes exist on DecisionDimensions, so renaming one fails here rather than silently widening what a human is deemed to have approved
+      # The verdict has to be reachable before the flow around it means anything.
+      - a policy returns REVIEW for a windowed aggregate above a review threshold and at or below the deny limit, and the three bands are pinned at their boundaries
+      - a review threshold above the deny limit is rejected at construction rather than producing a band that cannot occur
+      # Holding the review.
+      - a REVIEW verdict is held as control-plane state; nothing is dispatched, the trailing window is not consumed, and the agent is told awaiting_review
+      - the pending record classifies as control plane by the existing isolation suite, with no new rule added to make it do so
+      - the pending record is keyed by the reservation key, so one workload cannot see, consume or displace another's pending review
+      # Executing what was approved, after the window has moved.
+      - a checker's approval arriving after the intent's validity window has expired still executes, by re-completing the intent with a fresh window and re-deciding it — never by re-approving it, and never by extending the window that was decided (B5)
+      - the grant is bound to the proposal digest, and the gateway refuses to dispatch an intent whose proposal digest is not the approved one
+      - an approval for one proposal cannot execute a different proposal, including one differing only in counterparty, and a red-team case asserts it (B3)
+      - a re-decision that denies refuses and dispatches nothing, and the approval is not burnt by the refusal
+      - the approval remains one-shot, expiring and separated across the whole flow: a replayed grant produces no second dispatch, a missing expiry is treated as expired, and a checker whose subject equals the maker's is rejected (B2, B6)
+      # What the agent can learn, without widening the wire.
+      - the agent reads the outcome by re-sending the identical proposal under the same request_ref, and WIRE_VERSION stays 1
+      - a re-sent proposal is answered from the recorded state rather than re-decided, asserted by a policy that would answer differently on the second call
+      - a re-sent proposal does not consume the trailing window a second time
+      - a retry whose only difference is the clock is recognised as the same proposal, asserted with two distinct now values — the reservation binds the proposal digest, which the window is deliberately not part of
+      - the same handle carrying a materially different proposal stays refused, as it is today
+      # The record.
+      - INV-10's row states what an approval binds to and names its enforcing tests, and an ADR records the rejected alternatives
+      - every state this flow can reach leaves an audit receipt, and the chain still verifies across a held review and its later execution
+    required_tests: [unit, properties, architecture, redteam]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+    stop_for_human: true
+    checkpoint_reason: >
+      Changes what an approval means. INV-10 says an approval is bound to a
+      digest; this slice says it is bound to a digest over everything except the
+      validity window, because a human cannot answer inside a five-minute
+      window and the window is part of the intent digest. That is a weakening
+      of a stated guarantee in exchange for a usable one, and the shape was
+      agreed with a human before any code existed — see issue #59.
+    rationale: >
+      The maker-checker machinery, the approval identities and the gateway that
+      consumes a grant all exist and are tested. They are not connected across a
+      process boundary, so a REVIEW verdict is in practice a slower refusal: the
+      gateway answers awaiting_review and nothing carries that answer to a human
+      or brings one back.
+
+      Three facts found while scoping this, each of which changes what the slice
+      has to contain. No policy in core returns REVIEW, so the branch is
+      unreachable from the reference deployment. The intent TTL is five minutes
+      and the gateway re-verifies the window immediately before dispatch, so an
+      approved review would fail as window_expired even once wired. And the
+      window is inside the intent digest, so re-deciding to obtain a fresh
+      window yields a digest no human ever saw.
+
+      The threat model already answers the third: B5 says expiry forces
+      re-decision, not re-approval. This slice makes that sentence executable by
+      splitting the digest in two — the intent digest keeps binding execution to
+      the decided value (B1), and a proposal digest, which excludes the validity
+      window and nothing else, is what a human approves. What the human saw
+      cannot change; only the clock can.
+
+      Scoped deliberately without the approver's network channel. This slice
+      proves the flow in process; CORE-S023 puts a second listener on its own
+      trust anchor and its own network in front of it, with the falsifiable
+      deployment gate CORE-S019 established for the rail boundary.
+
   # --- On-chain -----------------------------------------------------------
   #
   # A second execution domain: agents that hold a wallet. It has its own threat

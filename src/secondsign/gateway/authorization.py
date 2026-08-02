@@ -43,18 +43,46 @@ there is no fourth status and `completed` would be a lie an agent could build on
 The receipt records `unknown`, which is the distinction that matters for
 reconciliation, and it records it against a keyed fingerprint of the principal
 rather than the raw SAN.
+
+**An answer is given once and then repeated.** A reservation holds the answer it
+produced, and a re-sent proposal reads it back rather than being decided again.
+This is not a cache. Re-deciding a settled action asks the policy a question
+whose answer has already changed *because of that action* — the first dispatch
+is in the trailing window, so the second evaluation sees its own spend — and an
+agent asking "did that go through?" would be told `refused` about a payment that
+completed. What makes the repeat safe is that the reservation binds the
+*proposal* digest: a retry a second later is the same proposal, and the same
+handle carrying different material is still refused.
+
+**A review is held, not answered.** `REVIEW` puts the proposal in the
+control-plane pending store and moves nothing. When a checker approves, the
+intent is re-completed from the stored proposal with a fresh window and
+re-decided — because the human's answer is not a permission slip that outranks a
+limit — and the grant, which binds the proposal rather than the intent, is what
+lets the window have moved while nothing else did (ADR 0005).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Final
+
+from pydantic import BaseModel, ConfigDict
 
 from secondsign.agent.surface import (
     AgentOutcomeStatus,
     AuthorizationOutcome,
     AuthorizationRequest,
+)
+from secondsign.approval import (
+    CheckerVerdict,
+    Grant,
+    MakerChecker,
+    MakerIdentity,
+    Rejected,
+    RejectionReason,
 )
 from secondsign.audit import AuditLog
 from secondsign.contracts import (
@@ -66,9 +94,16 @@ from secondsign.contracts import (
     SourceTrust,
 )
 from secondsign.controlplane.fingerprint import (
+    APPROVAL_DOMAIN,
     DECISION_DOMAIN,
+    MAKER_DOMAIN,
     PRINCIPAL_DOMAIN,
     FingerprintKey,
+)
+from secondsign.controlplane.pending import (
+    InMemoryPendingStore,
+    PendingReview,
+    PendingStore,
 )
 from secondsign.controlplane.window import WindowLedger
 from secondsign.decision import Decision, DecisionEngine, DecisionVerdict
@@ -82,9 +117,11 @@ from secondsign.intent import (
     IntentDigest,
     PaymentPayload,
     PaymentTargetKind,
+    ProposalDigest,
     SettlementPriority,
     TransactionIntent,
     compute_digest,
+    compute_proposal_digest,
 )
 from secondsign.policy import AggregateKey, PolicyContext
 
@@ -92,6 +129,43 @@ from secondsign.policy import AggregateKey, PolicyContext
 #: re-verified at dispatch and a long one is a replay opportunity; non-zero,
 #: because the decision and the dispatch are not the same instant.
 INTENT_TTL: Final[timedelta] = timedelta(minutes=5)
+
+#: How long a held review stays answerable. Long enough that a human in another
+#: timezone can answer within a working day, short enough that an approval left
+#: unanswered dies rather than accumulating.
+#:
+#: A constant, deliberately not a setting. An operator who can extend an
+#: approval's life by editing the gateway's environment is an operator whose
+#: expiry is a suggestion — the same reasoning that keeps the reference
+#: deployment's limits out of the environment.
+REVIEW_TTL: Final[timedelta] = timedelta(hours=4)
+
+
+class ReviewOutcomeStatus(StrEnum):
+    """What became of a checker's answer. Read by the approval channel, never
+    by the agent — which learns only its own three states."""
+
+    #: Approved, re-decided, and dispatched successfully.
+    executed = "executed"
+    #: Approved, and it did not run: the re-decision denied, the dispatch was
+    #: refused, or the rail failed. The human's answer was not the problem.
+    refused = "refused"
+    #: The answer itself was not usable — expired, replayed, self-approved,
+    #: bound to a different proposal, or a decline.
+    rejected = "rejected"
+
+
+class ReviewResolution(BaseModel):
+    """The result of resolving one held review."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: ReviewOutcomeStatus
+    #: Why the answer was not usable. Present only for `rejected`.
+    reason: RejectionReason | None = None
+    #: What the agent will read on its next poll, if the review settled.
+    outcome: AuthorizationOutcome | None = None
+
 
 #: Which rail class a payment lands on. Rails with no payment shape are absent
 #: rather than mapped to a default: a missing entry is a refusal.
@@ -188,10 +262,21 @@ def complete_intent(
 
 @dataclass(frozen=True)
 class _Reservation:
-    """What a handle was spent on. Held so a reused handle can be told apart
-    from a retry."""
+    """What a handle was spent on, and what it was told.
 
-    digest: IntentDigest
+    The digest held here is the **proposal** digest, not the intent digest. The
+    intent digest contains the validity window, which is derived from the clock,
+    so a retry one second later carries a different intent digest for a proposal
+    that has not changed — binding the reservation to it would refuse every
+    genuine retry as a different proposal and answer none of them.
+    """
+
+    proposal: ProposalDigest
+    #: The answer this handle has already been given. Repeated verbatim on a
+    #: re-send, so an agent's second question gets its first question's answer.
+    answer: AuthorizationOutcome
+    #: Set while a review is open under this handle; cleared when it resolves.
+    approval_id: str | None = None
 
 
 class AuthorizationService:
@@ -205,12 +290,20 @@ class AuthorizationService:
         ledger: WindowLedger,
         audit: AuditLog,
         keys: FingerprintKey,
+        pending: PendingStore | None = None,
+        maker_checker: MakerChecker | None = None,
     ) -> None:
         self._engine = engine
         self._gateway = gateway
         self._ledger = ledger
         self._audit = audit
         self._keys = keys
+        # Defaulted rather than optional. A deployment that did not supply a
+        # pending store still holds its reviews: the alternative is a REVIEW
+        # verdict silently dropped, which reads to the agent exactly like a
+        # review that no human will ever see — and is one.
+        self._pending = pending if pending is not None else InMemoryPendingStore()
+        self._maker_checker = maker_checker if maker_checker is not None else MakerChecker()
         self._reservations: dict[str, _Reservation] = {}
 
     def authorize(
@@ -231,32 +324,197 @@ class AuthorizationService:
             # every message the process received.
             return self._refuse(reservation_key, now)
 
-        digest = compute_digest(intent)
+        proposal = compute_proposal_digest(intent)
         held = self._reservations.get(reservation_key)
-        if held is not None and held.digest != digest:
-            # The same handle, a different proposal. Answering with the first
-            # outcome would tell the agent something happened to *this* request
-            # that did not; executing would honour a handle that is already
-            # spent. Refusing is the only statement that is true.
-            return self._refuse(reservation_key, now, digest=digest)
-        self._reservations[reservation_key] = _Reservation(digest=digest)
+        if held is not None:
+            if held.proposal != proposal:
+                # The same handle, a different proposal. Answering with the
+                # first outcome would tell the agent something happened to
+                # *this* request that did not; executing would honour a handle
+                # that is already spent. Refusing is the only true statement.
+                return self._refuse(reservation_key, now, digest=compute_digest(intent))
+            # The same proposal again. Repeat the answer rather than deciding
+            # again: the state the policy would read now includes this action's
+            # own effect, so a second decision answers a different question.
+            return held.answer
 
-        aggregate_key = AggregateKey.from_intent(intent)
-        decision = self._engine.decide(
-            intent, PolicyContext(window_aggregate=self._ledger.aggregate(aggregate_key, now=now))
-        )
+        decision = self._decide(intent, now=now)
+        if decision.verdict is DecisionVerdict.REVIEW:
+            return self._hold(
+                request,
+                intent,
+                decision,
+                proposal,
+                reservation_key=reservation_key,
+                principal_ref=principal_ref,
+                now=now,
+            )
         if decision.verdict is not DecisionVerdict.ALLOW:
-            return self._record(decision, principal_ref, now, outcome=None)
+            return self._settle(
+                reservation_key, proposal, decision, principal_ref, now, outcome=None
+            )
 
-        result = self._gateway.execute(intent, decision, now=now)
+        result = self._dispatch(intent, decision, now=now)
+        return self._settle(reservation_key, proposal, decision, principal_ref, now, outcome=result)
+
+    def open_reviews(self) -> tuple[PendingReview, ...]:
+        """Every review waiting for a human.
+
+        Control-plane state, and the approval channel's window onto it. Nothing
+        an agent can reach returns this — the managed agent's whole surface is
+        one verb, and it is not this one.
+        """
+        return self._pending.open_reviews()
+
+    def resolve(
+        self, approval_id: str, verdict: CheckerVerdict, *, now: datetime
+    ) -> ReviewResolution:
+        """A checker's answer to a held review.
+
+        The order of what follows is the design. The intent is re-completed from
+        the *stored* proposal — never from anything the agent has sent since —
+        and re-decided before the approval is consumed, so a limit that has
+        filled up refuses the action without burning the human's answer. Only
+        then is the one-shot spent, and only then does anything dispatch.
+        """
+        review = self._pending.get(approval_id)
+        if review is None:
+            return ReviewResolution(
+                status=ReviewOutcomeStatus.rejected,
+                reason=RejectionReason.unknown_approval,
+            )
+
+        intent = complete_intent(review.request, idempotency_key=review.reservation_key, now=now)
+        proposal = compute_proposal_digest(intent)
+        if proposal != review.approval.proposal:
+            # Belt and braces: re-completion is deterministic in everything but
+            # the window, so this cannot differ unless the completion logic
+            # itself changed under a running deployment. It is checked because
+            # it is the whole guarantee and it costs a comparison.
+            return ReviewResolution(
+                status=ReviewOutcomeStatus.rejected,
+                reason=RejectionReason.digest_mismatch,
+            )
+
+        decision = self._decide(intent, now=now)
+        if decision.verdict is DecisionVerdict.DENY:
+            # Policy state moved while the human was thinking. An approval is
+            # not a permission slip that outranks a limit — and the answer is
+            # not spent, so it still executes once the window drains.
+            self._audit.record(
+                digest=decision.digest,
+                verdict=decision.verdict,
+                reasons=decision.reasons,
+                outcome_status=None,
+                principal_ref=review.principal_ref,
+            )
+            return ReviewResolution(status=ReviewOutcomeStatus.refused)
+
+        consumed = self._maker_checker.consume(review.approval, verdict, now=now)
+        if isinstance(consumed, Rejected):
+            return ReviewResolution(status=ReviewOutcomeStatus.rejected, reason=consumed.reason)
+
+        result = self._dispatch(intent, decision, now=now, grant=consumed)
+        outcome = self._settle(
+            review.reservation_key,
+            proposal,
+            decision,
+            review.principal_ref,
+            now,
+            outcome=result,
+            approval_id=consumed.approval_id,
+        )
+        self._pending.release(approval_id)
+        status = (
+            ReviewOutcomeStatus.executed
+            if outcome.status is AgentOutcomeStatus.completed
+            else ReviewOutcomeStatus.refused
+        )
+        return ReviewResolution(status=status, outcome=outcome)
+
+    def _decide(self, intent: TransactionIntent, *, now: datetime) -> Decision:
+        aggregate = self._ledger.aggregate(AggregateKey.from_intent(intent), now=now)
+        return self._engine.decide(intent, PolicyContext(window_aggregate=aggregate))
+
+    def _dispatch(
+        self,
+        intent: TransactionIntent,
+        decision: Decision,
+        *,
+        now: datetime,
+        grant: Grant | None = None,
+    ) -> object:
+        result = self._gateway.execute(intent, decision, grant=grant, now=now)
         if isinstance(result, ExecutionOutcome) and result.status is not ExecutionStatus.failure:
             # Success, or an indeterminate dispatch that may have moved money.
             # Both consume the window: not counting `unknown` would let an agent
             # spend it twice by arranging for the first answer to be ambiguous.
             self._ledger.record(
-                aggregate_key, amount_minor=intent.dimensions.value_upper_minor, at=now
+                AggregateKey.from_intent(intent),
+                amount_minor=intent.dimensions.value_upper_minor,
+                at=now,
             )
-        return self._record(decision, principal_ref, now, outcome=result)
+        return result
+
+    def _hold(
+        self,
+        request: AuthorizationRequest,
+        intent: TransactionIntent,
+        decision: Decision,
+        proposal: ProposalDigest,
+        *,
+        reservation_key: str,
+        principal_ref: str,
+        now: datetime,
+    ) -> AuthorizationOutcome:
+        """Park a REVIEW where a human can reach it and an agent cannot.
+
+        Nothing is dispatched and nothing is deducted. Counting a held review
+        against the trailing window would let a stream of proposals no human
+        ever answers exhaust an agent's limit.
+        """
+        approval_id = self._keys.fingerprint(APPROVAL_DOMAIN, reservation_key)
+        approval = self._maker_checker.request(
+            decision,
+            # The workload that proposed the action is its maker. That is what
+            # makes self-approval structurally impossible for it: a checker is a
+            # different type, and this subject is a fingerprint of a machine.
+            MakerIdentity(subject=self._keys.fingerprint(MAKER_DOMAIN, principal_ref)),
+            approval_id=approval_id,
+            proposal=proposal,
+            expires_at=now + REVIEW_TTL,
+        )
+        self._pending.hold(
+            PendingReview(
+                approval_id=approval_id,
+                reservation_key=reservation_key,
+                principal_ref=principal_ref,
+                request=request,
+                approval=approval,
+            )
+        )
+        answer = self._settle(reservation_key, proposal, decision, principal_ref, now, outcome=None)
+        self._reservations[reservation_key] = _Reservation(
+            proposal=proposal, answer=answer, approval_id=approval_id
+        )
+        return answer
+
+    def _settle(
+        self,
+        reservation_key: str,
+        proposal: ProposalDigest,
+        decision: Decision,
+        principal_ref: str,
+        now: datetime,
+        *,
+        outcome: object,
+        approval_id: str | None = None,
+    ) -> AuthorizationOutcome:
+        answer = self._record(
+            decision, principal_ref, now, outcome=outcome, approval_id=approval_id
+        )
+        self._reservations[reservation_key] = _Reservation(proposal=proposal, answer=answer)
+        return answer
 
     def _record(
         self,
@@ -265,6 +523,7 @@ class AuthorizationService:
         now: datetime,
         *,
         outcome: object,
+        approval_id: str | None = None,
     ) -> AuthorizationOutcome:
         status = outcome.status if isinstance(outcome, ExecutionOutcome) else None
         self._audit.record(
@@ -272,10 +531,11 @@ class AuthorizationService:
             verdict=decision.verdict,
             reasons=decision.reasons,
             outcome_status=status,
+            approval_id=approval_id,
             principal_ref=principal_ref,
         )
         return AuthorizationOutcome(
-            status=_agent_status(decision.verdict, status),
+            status=_agent_status(decision.verdict, status, granted=approval_id is not None),
             # Opaque, and derived from the digest rather than from anything the
             # rail returned: a reference an agent can quote to a human must not
             # be a handle on the payment itself.
@@ -304,17 +564,26 @@ class AuthorizationService:
 
 
 def _agent_status(
-    verdict: DecisionVerdict, execution: ExecutionStatus | None
+    verdict: DecisionVerdict,
+    execution: ExecutionStatus | None,
+    *,
+    granted: bool = False,
 ) -> AgentOutcomeStatus:
     """What the agent is told, from what happened.
 
-    `completed` has exactly one origin: a decision that allowed and a dispatch
-    that is known to have succeeded. Everything else — a denial, a review, a
-    refused dispatch, a failure, an indeterminate result — reads as one of the
-    other two states, because there is no fourth status for uncertainty and an
-    agent that could spot one would retry against it (INV-1).
+    `completed` has exactly one origin: a decision that permitted the action and
+    a dispatch that is known to have succeeded. Everything else — a denial, a
+    review, a refused dispatch, a failure, an indeterminate result — reads as
+    one of the other two states, because there is no fourth status for
+    uncertainty and an agent that could spot one would retry against it (INV-1).
+
+    A `REVIEW` that has been granted is no longer awaiting one. The verdict on
+    the receipt stays `REVIEW`, because that is what the engine decided and a
+    receipt saying `ALLOW` would be false; what changes is that a human has
+    since answered, and `granted` is that fact rather than a re-reading of the
+    verdict.
     """
-    if verdict is DecisionVerdict.REVIEW:
+    if verdict is DecisionVerdict.REVIEW and not granted:
         return AgentOutcomeStatus.awaiting_review
     if execution is ExecutionStatus.success:
         return AgentOutcomeStatus.completed

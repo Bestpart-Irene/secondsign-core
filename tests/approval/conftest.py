@@ -27,6 +27,7 @@ from secondsign.intent import (
     SettlementPriority,
     TransactionIntent,
     compute_digest,
+    compute_proposal_digest,
 )
 
 _EPOCH = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
@@ -74,20 +75,28 @@ def make_review_decision(intent: TransactionIntent | None = None) -> Decision:
 def make_pending(
     *,
     approval_id: str = "appr-0001",
+    intent: TransactionIntent | None = None,
     decision: Decision | None = None,
     maker: MakerIdentity = MAKER,
     expires_at=EXPIRES_AT,
 ) -> PendingApproval:
+    intent = intent if intent is not None else make_intent()
     return PendingApproval(
         approval_id=approval_id,
-        decision=decision if decision is not None else make_review_decision(),
+        decision=decision if decision is not None else make_review_decision(intent),
+        proposal=compute_proposal_digest(intent),
         maker=maker,
         expires_at=expires_at,
     )
 
 
 def approve(pending: PendingApproval, checker: CheckerIdentity = CHECKER) -> CheckerVerdict:
-    return CheckerVerdict(checker=checker, digest=pending.digest, approved=True)
+    return CheckerVerdict(
+        checker=checker,
+        approval_id=pending.approval_id,
+        proposal=pending.proposal,
+        approved=True,
+    )
 
 
 class AutoApproveProvider:
@@ -98,7 +107,12 @@ class AutoApproveProvider:
         self._checker = checker
 
     def present(self, pending: PendingApproval) -> CheckerVerdict:
-        return CheckerVerdict(checker=self._checker, digest=pending.digest, approved=True)
+        return CheckerVerdict(
+            checker=self._checker,
+            approval_id=pending.approval_id,
+            proposal=pending.proposal,
+            approved=True,
+        )
 
 
 def fresh_maker_checker() -> MakerChecker:

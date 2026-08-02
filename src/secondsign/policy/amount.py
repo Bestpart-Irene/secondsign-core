@@ -19,9 +19,15 @@ Two fail-closed choices matter here:
 
 The policy reads the aggregate; it does not compute it. The aggregate is
 control-plane state the managed agent cannot reach, supplied as context.
+
+A limit may declare a third band. Below `review_above_minor` the action is the
+machine's to allow; between there and the cap it is held for a human (REVIEW);
+above the cap it is denied. The review threshold is optional, and a limit whose
+threshold sits at or above its cap is refused at construction rather than
+producing a band no action can reach.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from secondsign.contracts import (
     Currency,
@@ -79,7 +85,8 @@ class WindowAggregate(BaseModel):
 
 
 class AmountLimit(BaseModel):
-    """A cap on the windowed aggregate for one currency."""
+    """A cap on the windowed aggregate for one currency, and where a human
+    enters."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -87,6 +94,25 @@ class AmountLimit(BaseModel):
     window_seconds: int = Field(gt=0)
     #: Inclusive cap: spending exactly this much is allowed, a unit more is not.
     max_aggregate_minor: int = Field(ge=0)
+    #: Above this, the decision stops being the machine's to make and the action
+    #: is held for a checker. Exclusive, and optional: absent means this limit
+    #: has two bands rather than three, which is what every deployment before
+    #: CORE-S022 had.
+    review_above_minor: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _review_band_can_occur(self) -> "AmountLimit":
+        if self.review_above_minor is None:
+            return self
+        if self.review_above_minor >= self.max_aggregate_minor:
+            # At the cap, every value above the threshold is also above the cap,
+            # so the band is empty and no action would ever reach a human. An
+            # operator who writes this means something, and it is not this.
+            raise ValueError(
+                "review_above_minor must be below max_aggregate_minor, or the "
+                "review band is empty and no action can reach a human"
+            )
+        return self
 
 
 class PolicyContext(BaseModel):
@@ -128,5 +154,27 @@ class AmountWindowPolicy:
                 ReasonCode.value_band_exceeded,
                 observed=prospective,
                 limit=self._limit.max_aggregate_minor,
+            )
+        review_above = self._limit.review_above_minor
+        if review_above is not None and prospective > review_above:
+            # Checked after the cap, so a value over both is denied rather than
+            # reviewed. Combination would reach the same answer — DENY is
+            # stricter than REVIEW and the algebra takes the maximum — but a
+            # policy that returned REVIEW for an over-cap action would be
+            # stating something false about it in its own finding.
+            #
+            # The code is `value_band_exceeded` rather than a review-specific
+            # one because the reason vocabulary is frozen at CONTRACT_VERSION 1
+            # and minting a code is a contract change. The verdict says a human
+            # is needed; the finding says which band was crossed to decide that.
+            return PluginJudgement(
+                verdict=PluginVerdict.REVIEW,
+                findings=(
+                    Finding(
+                        code=ReasonCode.value_band_exceeded,
+                        observed=prospective,
+                        limit=review_above,
+                    ),
+                ),
             )
         return _ABSTAIN
