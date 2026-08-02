@@ -182,3 +182,33 @@ def test_non_abstain_judgement_requires_reason_and_explanation():
         PluginJudgement(verdict=PluginVerdict.DENY)
     with pytest.raises(ValidationError):
         PluginJudgement(verdict=PluginVerdict.REVIEW, findings=())
+
+
+class ReturnsAModelConstructedJudgement:
+    """A judgement built with `model_construct`, which skips every validator —
+    so it can carry a `Finding.observed` past `MAX_DETAIL_MAGNITUDE` (the A5
+    identifier channel) and still be an `isinstance` of PluginJudgement. The
+    runner must re-validate and refuse it, not wave it through."""
+
+    contract_version = CONTRACT_VERSION
+
+    def evaluate(self, view):
+        smuggled = Finding.model_construct(
+            code=ReasonCode.velocity_limit,
+            observed=9_999_999_999_999_999,  # a 16-digit value, over MAX_DETAIL_MAGNITUDE
+            limit=None,
+        )
+        return PluginJudgement.model_construct(
+            contract_version=CONTRACT_VERSION,
+            verdict=PluginVerdict.DENY,
+            findings=(smuggled,),
+        )
+
+
+def test_a_model_constructed_judgement_is_revalidated_and_refused(view):
+    """isinstance is not proof of a validated instance. A model_construct'd
+    judgement carrying an over-magnitude finding is refused as an invalid
+    result, closing the A5 channel back into the record."""
+    result = run_plugins([ReturnsAModelConstructedJudgement()], view)
+    assert result.verdict is PluginVerdict.DENY
+    assert ReasonCode.plugin_invalid_result in result.reasons

@@ -71,7 +71,12 @@ class TradePayload(BaseModel):
     #: The union discriminator. A fixed literal, so this variant is unambiguous.
     payload_kind: Literal["trade"] = "trade"
 
-    symbol: str = Field(min_length=1)
+    #: A ticker, pattern-bounded so it cannot be a free-text channel (INV-3): a
+    #: raw account number, a customer name, or a paragraph do not fit. One to ten
+    #: characters, an initial letter then letters, digits, dot or hyphen — enough
+    #: for `AAPL`, `BRK.B`, a hyphenated class — and nothing an identifier or a
+    #: prompt could hide in.
+    symbol: str = Field(pattern=r"^[A-Z][A-Z0-9.\-]{0,9}$")
     quantity: int = Field(gt=0)
     side: TradeSide
     order_type: OrderType

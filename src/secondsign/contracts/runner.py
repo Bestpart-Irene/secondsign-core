@@ -12,6 +12,8 @@ import logging
 from collections.abc import Iterable
 from typing import Protocol, runtime_checkable
 
+from pydantic import ValidationError
+
 from secondsign.contracts.combine import combine, neutral
 from secondsign.contracts.types import (
     CONTRACT_VERSION,
@@ -88,6 +90,17 @@ def _evaluate_isolated(plugin: object, view: PolicyView) -> PluginJudgement:
         return _deny(ReasonCode.plugin_error)
 
     if not isinstance(result, PluginJudgement):
+        return _deny(ReasonCode.plugin_invalid_result)
+    # isinstance is not enough: a subclass overriding `findings`/`sort_key`, or an
+    # instance built with `model_construct`, is a `PluginJudgement` that never ran
+    # a validator — re-opening the `MAX_DETAIL_MAGNITUDE` bound on `Finding.observed`
+    # (the A5 identifier channel) and the "non-ABSTAIN needs findings" rule. Round-
+    # tripping through `model_validate` forces every validator to run and yields a
+    # canonical base instance, so what combines downstream is what the contract
+    # actually permits, not what an extension asserted it built.
+    try:
+        result = PluginJudgement.model_validate(result.model_dump())
+    except ValidationError:
         return _deny(ReasonCode.plugin_invalid_result)
     if result.contract_version != CONTRACT_VERSION:
         return _deny(ReasonCode.plugin_contract_mismatch)
