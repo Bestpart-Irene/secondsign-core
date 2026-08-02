@@ -312,16 +312,23 @@ class AuthorizationService:
         # must not move: two proposals that both read "nothing spent" and both
         # dispatch would each be within the cap while their sum is not. The
         # reservation guards a *repeat* of one handle; nothing but this guards
-        # the window against *distinct* handles arriving together. Reentrant
-        # because the resolve path re-enters through the same helpers.
+        # the window against *distinct* handles arriving together.
         #
-        # It is held across dispatch on purpose. The reference stores are
-        # in-memory (INV-12 / CORE-S017), so the window and the reservation are
-        # this process's memory and the only correct place to serialise them is
-        # here; a distributed control plane enforces the same invariant with a
-        # conditional write on the durable store instead, and would hold no
-        # process-local lock across rail I/O.
-        self._lock = threading.RLock()
+        # It is held across dispatch on purpose, and that is a throughput
+        # statement as much as a correctness one: every authorization in the
+        # process serialises through here, including refusals that never touch
+        # the rail, and a slow rail call holds the line for everyone behind it.
+        # The reference stores are in-memory (INV-12 / CORE-S017), so this
+        # process's memory is the only correct place to serialise them and the
+        # trade is right; a distributed control plane enforces the same
+        # invariant with a conditional write on the durable store instead, and
+        # holds no process-local lock across rail I/O.
+        #
+        # A plain Lock, not an RLock, and not defensively: no path re-acquires
+        # it — `authorize` and `resolve` do not call each other and no helper
+        # takes it — and if a future change introduces re-entry, deadlocking
+        # immediately is the alarm; an RLock would let the mistake in quietly.
+        self._lock = threading.Lock()
 
     def authorize(
         self, principal: str, request: AuthorizationRequest, *, now: datetime
