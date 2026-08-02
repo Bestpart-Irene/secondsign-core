@@ -52,10 +52,18 @@ def _deny(
 
 
 class AggregateKey(BaseModel):
-    """What a window aggregate is grouped by: counterparty, source, rail."""
+    """What a window aggregate is grouped by: currency, counterparty, source, rail.
+
+    Currency is part of the key, not an afterthought: a window sums minor units,
+    and minor units of two currencies are not comparable quantities. Keying by
+    currency means a EUR spend and a USD spend against the same counterparty are
+    two windows, so a multi-currency deployment cannot measure one against the
+    other's cap.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    quote_currency: Currency
     counterparty_ref: str
     source_account_ref: str
     rail_class: RailClass
@@ -64,6 +72,7 @@ class AggregateKey(BaseModel):
     def from_intent(cls, intent: TransactionIntent) -> "AggregateKey":
         d = intent.dimensions
         return cls(
+            quote_currency=d.quote_currency,
             counterparty_ref=d.counterparty_ref,
             source_account_ref=d.source_account_ref,
             rail_class=d.rail_class,
