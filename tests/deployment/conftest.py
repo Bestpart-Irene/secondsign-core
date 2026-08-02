@@ -37,10 +37,20 @@ COMPOSE_FILE = REFERENCE / "compose.yaml"
 #: against.
 JOINED_OVERRIDE = REFERENCE / "compose.joined.yaml"
 
+#: The same construction for the second door (CORE-S023): the agent joined to
+#: the approver's network. Only `test_approver_gate_liveness.py` stands it up.
+APPROVER_JOINED_OVERRIDE = REFERENCE / "compose.approver-joined.yaml"
+
 #: Services, named once so a rename breaks in one place.
 AGENT = "agent"
 GATEWAY = "gateway"
 RAIL = "rail"
+APPROVER = "approver"
+
+#: Where the approver listener binds: the gateway's fixed address on
+#: approvernet, and that address only — which is the isolation claim.
+APPROVER_ADDRESS = "172.28.99.10"
+APPROVER_PORT = 8788
 
 #: The port the gateway binds inside its own container.
 GATEWAY_LISTEN_PORT = 8787
@@ -97,6 +107,12 @@ REFERENCE_TOPOLOGY = Topology("secondsign-reference", (COMPOSE_FILE,))
 #: The same deployment with the agent joined to the rail's network. Used only by
 #: the mutation check, which requires the isolation cases to fail against it.
 JOINED_TOPOLOGY = Topology("secondsign-reference-joined", (COMPOSE_FILE, JOINED_OVERRIDE))
+
+#: And with the agent joined to the approver's network (CORE-S023). Used only
+#: by the approver-channel mutation check, for the same reason.
+APPROVER_JOINED_TOPOLOGY = Topology(
+    "secondsign-reference-approver-joined", (COMPOSE_FILE, APPROVER_JOINED_OVERRIDE)
+)
 
 
 def _wait_for_listener(topology: Topology, service: str, port: int, seconds: float) -> None:
@@ -243,11 +259,11 @@ def _bring_up(topology: Topology):
             f"exit={generated.returncode}\n{generated.stdout}\n{generated.stderr}"
         )
 
-    ready = topology.compose("up", "-d", "--build", "--wait", RAIL, AGENT)
+    ready = topology.compose("up", "-d", "--build", "--wait", RAIL, AGENT, APPROVER)
     if ready.returncode != 0:
         pytest.fail(
-            f"the agent and rail containers did not come up, so nothing in this "
-            f"suite can be believed:\n{ready.stdout}\n{ready.stderr}"
+            f"the agent, rail and approver containers did not come up, so nothing "
+            f"in this suite can be believed:\n{ready.stdout}\n{ready.stderr}"
         )
 
     # Best-effort. Its absence is reported by the cases that need it.
@@ -274,3 +290,13 @@ def joined_stack() -> Stack:
     operators not to build, and its whole purpose is to be caught.
     """
     yield from _bring_up(JOINED_TOPOLOGY)
+
+
+@pytest.fixture(scope="session")
+def approver_joined_stack() -> Stack:
+    """The same deployment with the agent joined to the approver's network.
+
+    The second door's counterpart of `joined_stack`, stood up only by
+    `test_approver_gate_liveness.py`, and existing only to be caught.
+    """
+    yield from _bring_up(APPROVER_JOINED_TOPOLOGY)

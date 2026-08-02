@@ -5,13 +5,22 @@ rather than of the agent's good behaviour.
 
 ```text
 agent ──agentnet── gateway ──railnet── rail
-  ×────────────────────────────────────┘
+  ×───────────────────╂─────────────────┘
+  ×────approvernet────┨
+approver ─────────────┘
 ```
 
 `agent` is joined to `agentnet` and nothing else. No firewall rule does this and
 no policy enforces it: the container has **no interface** on the network the
 rail is on. "The agent cannot reach the rail" is therefore a fact about what
 exists, not about what is permitted.
+
+The same construction guards the other direction of trust (`CORE-S023`): the
+**approver channel** — the second mTLS listener a human answers reviews
+through — binds to the gateway's fixed address on `approvernet`, a network the
+agent likewise has no interface on. Its clients authenticate under a *separate
+CA*; the gateway refuses to start if the two anchors are one certificate, or
+if any principal appears on both allowlists.
 
 ```bash
 cd deploy/reference
@@ -42,9 +51,11 @@ read-only into exactly one container:
 
 | Directory | Holds | Mounted into |
 |---|---|---|
-| `tls/ca/` | CA signing key | **nothing** |
-| `tls/gateway/` | gateway cert + key, CA cert | `gateway` |
-| `tls/agent/` | client cert + key, CA cert | `agent` |
+| `tls/ca/` | agent-channel CA signing key | **nothing** |
+| `tls/approver-ca/` | approver-channel CA signing key | **nothing** |
+| `tls/gateway/` | both listeners' certs + keys, both CA certs | `gateway` |
+| `tls/agent/` | client cert + key, agent CA cert | `agent` |
+| `tls/approver/` | checker cert + key, approver CA cert | `approver` |
 
 The CA signing key is mounted nowhere. Something that can *mint* an identity
 outranks anything that can use one — an agent able to read it could name itself
@@ -160,6 +171,10 @@ enforcing process's environment has a limit that is a suggestion. Real limits ar
 control-plane state under an auditable authority (`CORE-S017`), which is not yet
 wired.
 
-What is still missing: the maker-checker flow behind a `REVIEW`. The decision
-path can return `awaiting_review`, and nothing in this deployment yet presents
-that to a human or carries an approval back.
+Since `CORE-S022`/`CORE-S023`, a `REVIEW` is no longer a dead end here. The
+deployment enables a review band **exactly because** the approver channel is
+configured — a proposal between $200 and the $500 cap parks, the approver
+container lists it and answers it over its own channel
+(`approver/console.py`), and the agent's re-send of its own handle reads
+`completed`. A deployment without the approver settings gets no review band,
+so no action is ever parked where no human can reach it.

@@ -1,0 +1,19 @@
+# Copyright 2026 SecondSign contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# The mutation, part two (CORE-S023): the one line that breaks the approver
+# boundary. Overlaid on compose.yaml by the `deployment_mutation` suite —
+# never by a person — this joins the agent to the approver's network and
+# changes nothing else: same images, same mounts, same credential placement.
+#
+#     docker compose -f compose.yaml -f compose.approver-joined.yaml ...
+#
+# Against this topology the cases asserting "the agent has no route to the
+# approval channel" MUST fail. If they pass here, they are not testing the
+# route — and a gate that cannot fail is not a gate. It is the same argument
+# `compose.joined.yaml` makes about the rail boundary, applied to the second
+# door.
+
+services:
+  agent:
+    networks: [agentnet, approvernet]
