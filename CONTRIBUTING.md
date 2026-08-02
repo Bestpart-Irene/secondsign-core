@@ -229,6 +229,11 @@ python tools/render_roadmap.py --check
 python tools/check_doc_links.py
 ```
 
+`pytest` runs the concurrency and cross-component integrity checks in
+[`tests/integrity/`](tests/integrity/) as part of the suite. For a one-second
+sanity check that the decision path is wired end to end — no Docker, no real
+rail — `python tools/smoke.py` runs the same thing `test_smoke` gates.
+
 The three slice tools, plus the sign-off check and a comparison against `main`, are
 what `python tools/contributor_check.py` runs in one pass — the same scripts,
 invoked rather than reimplemented, with the fix command printed beside each
