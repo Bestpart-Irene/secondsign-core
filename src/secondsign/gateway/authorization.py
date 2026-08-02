@@ -66,7 +66,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Final
 
@@ -329,6 +329,16 @@ class AuthorizationService:
         # takes it — and if a future change introduces re-entry, deadlocking
         # immediately is the alarm; an RLock would let the mistake in quietly.
         self._lock = threading.Lock()
+        # The clock this service decides against, never allowed to run backwards.
+        # `now` is stamped per request in the handler thread before the lock is
+        # taken, and the lock is not FIFO-fair, so a request with an earlier
+        # stamp can acquire the lock after a later-stamped one already recorded
+        # its spend. The window aggregate is bounded at `now`, so the
+        # earlier-stamped decision would be blind to that spend and could
+        # overspend the cap. Clamping every decision's clock up to a monotonic
+        # floor means each one sees every spend recorded before it, whatever
+        # order the stamps arrived in. Updated only under the lock.
+        self._now_floor = datetime.min.replace(tzinfo=timezone.utc)
 
     def authorize(
         self, principal: str, request: AuthorizationRequest, *, now: datetime
@@ -350,6 +360,9 @@ class AuthorizationService:
 
         proposal = compute_proposal_digest(intent)
         with self._lock:
+            # The clock may not run backwards: a decision reads the window as of
+            # `now`, so a `now` behind a spend already recorded would not see it.
+            now = self._now_floor = max(now, self._now_floor)
             held = self._reservations.get(reservation_key)
             if held is not None:
                 if held.proposal != proposal:
@@ -413,6 +426,7 @@ class AuthorizationService:
             # as absent. The one-shot consume also has to be atomic with the
             # get/release around it, or two calls answering one review could
             # both pass `get` before either releases.
+            now = self._now_floor = max(now, self._now_floor)
             review = self._pending.get(approval_id)
             if review is None:
                 return ReviewResolution(

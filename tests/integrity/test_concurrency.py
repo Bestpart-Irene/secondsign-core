@@ -23,7 +23,7 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from secondsign.agent.surface import AuthorizationRequest
 from secondsign.audit import AuditLog, InMemoryAuditSink
@@ -134,6 +134,40 @@ class TestTheCapHoldsUnderConcurrency:
         completed = statuses.count("completed")
         assert completed == rail.dispatch_count
         assert completed <= CAP // PER_PROPOSAL
+
+    def test_the_cap_holds_when_stamp_order_inverts_lock_order(self) -> None:
+        """The subtler leak, deterministic and thread-free.
+
+        `now` is stamped in the handler thread *before* the lock is taken, and
+        the lock is not FIFO-fair — it is held across a rail call — so under a
+        burst a request with an earlier stamp can acquire the lock *after* a
+        later-stamped one has already recorded its spend. The window aggregate
+        is bounded at `now`, so that earlier-stamped decision cannot see the
+        later spend, and both dispatch. The lock serialises the sections; it
+        does not order them by clock. The single-shared-`NOW` test above cannot
+        see this, because `e.at == now` holds by equality regardless of order.
+
+        Two sequential calls reproduce it exactly: a $900 at T+2s records at
+        T+2s, then a $900 stamped at T reads the window as of T — blind to the
+        T+2s entry — and both would complete for $1,800 against a $1,000 cap
+        unless the service refuses to let its clock run backwards.
+        """
+        rail = CountingRail()
+        service = _service(rail)
+
+        first = service.authorize(
+            PRINCIPAL, _request("aa" * 32, 900_00), now=NOW + timedelta(seconds=2)
+        )
+        second = service.authorize(PRINCIPAL, _request("bb" * 32, 900_00), now=NOW)
+
+        assert (first.status.value, second.status.value) == ("completed", "refused"), (
+            f"got {first.status.value}/{second.status.value} — an earlier stamp "
+            "arriving after a later one saw a stale window and overspent"
+        )
+        assert rail.dispatched_minor <= CAP, (
+            f"dispatched {rail.dispatched_minor} against a cap of {CAP} — the "
+            "clock ran backwards and the window under-counted a prior spend"
+        )
 
 
 class TestIdempotencyHoldsUnderConcurrency:

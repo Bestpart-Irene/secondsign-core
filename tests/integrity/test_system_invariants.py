@@ -100,8 +100,12 @@ def test_after_a_mixed_workload_the_books_agree(system) -> None:
     def at(minute: int) -> datetime:
         # A monotonic clock, all within the one-hour window so nothing ages out.
         # The window is time-indexed, so a spend recorded at minute N is only
-        # visible to a decision made at minute ≥ N — the workload has to move
-        # forward in time, which is also how the real gateway sees it.
+        # visible to a decision made at minute ≥ N. This sequential test feeds
+        # the stamps in order; the *real* gateway does not guarantee that
+        # (stamps are taken before a non-FIFO lock), which is exactly the leak
+        # `test_the_cap_holds_when_stamp_order_inverts_lock_order` covers — the
+        # service clamps its clock to a monotonic floor so an out-of-order stamp
+        # still sees every prior spend.
         return start + timedelta(minutes=minute)
 
     # A small allow, dispatched.
