@@ -643,6 +643,59 @@ slices:
       trust anchor and its own network in front of it, with the falsifiable
       deployment gate CORE-S019 established for the rail boundary.
 
+  - id: CORE-S023
+    title: The approver's channel — a second mTLS listener the agent has no route to
+    depends_on: [CORE-S022]
+    threats: [B6, B2, B3]
+    scope:
+      - src/secondsign/gateway/**
+      - tests/gateway/**
+      - tests/e2e/**
+      - tests/deployment/**
+      - deploy/reference/**
+      - docs/slices/roadmap.yaml
+      - docs/slices/STATUS.md
+    # CORE-S022 forbade "a checker identity derivable from a client
+    # certificate" because in its scope the only client certificates were the
+    # agent's. This slice is where a checker identity legitimately comes from a
+    # certificate — one issued under the approver channel's own trust anchor,
+    # which the agent channel's CA cannot mint. The two statements are one
+    # rule: an agent-channel credential never yields a checker.
+    forbidden:
+      - the approver channel and the agent channel sharing a trust anchor
+      - a principal holding a credential for both channels
+      - a checker identity read from a request body, or from an agent-channel certificate
+      - a plaintext approver listener, loopback included
+      - a review band enabled in a deployment with no approver channel
+      - any change to the agent wire — no new agent endpoint, status or field, and WIRE_VERSION stays 1
+    acceptance:
+      - a REVIEW held by the gateway can be listed and answered over the second listener, and after approval the agent reads completed by re-sending its own handle, with the rail's ledger longer by exactly one
+      - a process whose approver CA and agent client CA are byte-identical refuses to start, as does one whose agent and approver allowlists intersect
+      - a partial approver configuration is a refusal to start, never a channel with defaults
+      - an agent-channel certificate is refused at the approver channel, and an approver certificate at the agent channel
+      - the reference deployment binds the approver listener to the gateway's address on approvernet, a network the agent has no interface on, and the deployment suite asserts the agent has no route to it
+      - a joined overlay grants the agent a route to approvernet and CI requires the isolation cases to go red against it, so the gate is proven able to fail
+      - the reference deployment enables the review band exactly when the approver channel is configured
+    required_tests: [unit, e2e, deployment_topology]
+    gates:
+      [ruff_check, ruff_format, pytest, lint_imports, deployment_topology]
+    stop_for_human: true
+    checkpoint_reason: >
+      This is the door humans answer reviews through, and the last functional
+      gap before the reference deployment can hold money for a human's answer.
+      A human confirms the channel separation — trust anchor, population,
+      network — is structural before the deployment claims it.
+    rationale: >
+      CORE-S022 wired the flow and deliberately left the reference deployment
+      without a review threshold, because a deployment that can park an action
+      for a human must hold a door a human can answer through. This slice is
+      the door: a second mTLS listener sharing the authorization service (the
+      pending store lives in it) and nothing else — its own trust anchor, its
+      own allowlist, its own network. B6's "an agent cannot reach the approval
+      channel" becomes a routing fact asserted by the deployment suite and
+      falsified by an overlay, the same construction CORE-S019 used for the
+      rail boundary.
+
   # --- On-chain -----------------------------------------------------------
   #
   # A second execution domain: agents that hold a wallet. It has its own threat

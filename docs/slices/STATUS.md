@@ -18,7 +18,7 @@ slice that stops for a human before it is marked done.
 | Slice | Title | Waiting on |
 |---|---|---|
 | `CORE-S018` ⚑ | Extension health and a declared degraded state | — |
-| `CORE-S024` ⚑ | A shared module may not reach the control plane | — |
+| `CORE-S023` ⚑ | The approver's channel — a second mTLS listener the agent has no route to | — |
 | `ONCHAIN-S001` ⚑ | Falsify or confirm the double-guard topology on a local chain | — |
 | `ONCHAIN-S002` | Candidate on-chain verdict types behind an unfrozen version constant | — |
 
@@ -28,7 +28,7 @@ slice that stops for a human before it is marked done.
 |---|---|---|
 | `ONCHAIN-S003` ⚑ | Generalise the strictness algebra in a private kernel without moving the public surface | ONCHAIN-S002 |
 
-## Complete (21)
+## Complete (22)
 
 | Slice | Title | Waiting on |
 |---|---|---|
@@ -53,6 +53,7 @@ slice that stops for a human before it is marked done.
 | `CORE-S020` ⚑ | Publish the on-chain threat model and admit on-chain slices to the queue | — |
 | `CORE-S021` | Explain malformed Fingerprint values without exposing identifiers | — |
 | `CORE-S022` ⚑ | Carry a REVIEW verdict to a human and back, and execute what was approved | — |
+| `CORE-S024` ⚑ | A shared module may not reach the control plane | — |
 
 ---
 
