@@ -69,6 +69,7 @@ import json
 import os
 import ssl
 import sys
+import threading
 from datetime import datetime, timezone
 from enum import StrEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -108,20 +109,37 @@ MAX_AUTHORIZE_BODY_BYTES: Final[int] = 1_048_576
 #: equal; a third copy inside core would be drift with nothing to buy.
 _PRINCIPAL_FIELDS: Final[tuple[str, ...]] = PRINCIPAL_FIELDS
 
+#: The approver channel's settings (CORE-S023). Declared here, in the process's
+#: one settings registry, and imported by `secondsign.gateway.approver` — the
+#: loader and the unknown-setting refusal must agree on this list, and two
+#: copies of it would be how they stop agreeing.
+APPROVER_SETTINGS: Final[frozenset[str]] = frozenset(
+    {
+        "SECONDSIGN_APPROVER_BIND",
+        "SECONDSIGN_APPROVER_TLS_CERT",
+        "SECONDSIGN_APPROVER_TLS_KEY",
+        "SECONDSIGN_APPROVER_CA",
+        "SECONDSIGN_APPROVER_ALLOWLIST",
+    }
+)
+
 #: Every setting this process reads. Anything else under the prefix is a refusal
 #: to start. The rail entries are read by `build_authorization` and consumed by
 #: the rail executor; `load_config` never stores their values, so the credential
 #: is not reachable through anything this module renders.
-KNOWN_SETTINGS: Final[frozenset[str]] = frozenset(
-    {
-        "SECONDSIGN_BIND",
-        "SECONDSIGN_TLS_CERT",
-        "SECONDSIGN_TLS_KEY",
-        "SECONDSIGN_CLIENT_CA",
-        "SECONDSIGN_CLIENT_ALLOWLIST",
-        "SECONDSIGN_RAIL_URL",
-        "SECONDSIGN_RAIL_API_KEY",
-    }
+KNOWN_SETTINGS: Final[frozenset[str]] = (
+    frozenset(
+        {
+            "SECONDSIGN_BIND",
+            "SECONDSIGN_TLS_CERT",
+            "SECONDSIGN_TLS_KEY",
+            "SECONDSIGN_CLIENT_CA",
+            "SECONDSIGN_CLIENT_ALLOWLIST",
+            "SECONDSIGN_RAIL_URL",
+            "SECONDSIGN_RAIL_API_KEY",
+        }
+    )
+    | APPROVER_SETTINGS
 )
 
 _SETTING_PREFIX: Final[str] = "SECONDSIGN_"
@@ -140,6 +158,13 @@ class StartupRefusalReason(StrEnum):
     missing_principal_allowlist = "missing_principal_allowlist"
     malformed_principal_entry = "malformed_principal_entry"
     wildcard_principal_entry = "wildcard_principal_entry"
+    #: The approver channel (CORE-S023) was configured in part. Half a channel
+    #: is refused, never defaulted.
+    incomplete_approver_channel = "incomplete_approver_channel"
+    #: The approver CA and the agent client CA are one certificate (B6).
+    shared_trust_anchor = "shared_trust_anchor"
+    #: One URI holds credentials for both doors — its own checker (B6).
+    principal_on_both_channels = "principal_on_both_channels"
 
 
 class ConfigurationRefusal(BaseModel):
@@ -617,8 +642,17 @@ class GatewayServer:
 REFERENCE_WINDOW_SECONDS: Final[int] = 3600
 REFERENCE_LIMIT_MINOR: Final[int] = 500_00
 
+#: Above this, the reference deployment holds the action for a human — but only
+#: when the approver channel is configured. A deployment that can reach REVIEW
+#: with no channel would park proposals where no human can answer them, so the
+#: band exists exactly when the door does (CORE-S022 left this deliberately
+#: unset; CORE-S023 is the door).
+REFERENCE_REVIEW_ABOVE_MINOR: Final[int] = 200_00
 
-def build_authorization(environ: Mapping[str, str]) -> AuthorizationService | None:
+
+def build_authorization(
+    environ: Mapping[str, str], *, review_band: bool = False
+) -> AuthorizationService | None:
     """Assemble the decision path, if this deployment has a rail to move on.
 
     Returns None when either rail setting is absent: a gateway with no rail can
@@ -639,6 +673,7 @@ def build_authorization(environ: Mapping[str, str]) -> AuthorizationService | No
         quote_currency=Currency.USD,
         window_seconds=REFERENCE_WINDOW_SECONDS,
         max_aggregate_minor=REFERENCE_LIMIT_MINOR,
+        review_above_minor=REFERENCE_REVIEW_ABOVE_MINOR if review_band else None,
     )
     return AuthorizationService(
         engine=DecisionEngine([AmountWindowPolicy(limit)]),
@@ -679,27 +714,91 @@ def create_server(
 
 
 def main(environ: Mapping[str, str] | None = None) -> int:
-    """The process entry point: configure, bind, serve until told to stop."""
+    """The process entry point: configure, bind, serve until told to stop.
+
+    One process, up to two listeners. The approver channel (CORE-S023) shares
+    the authorization service — it must, because the pending store lives in it —
+    and shares nothing else: its own trust anchor, its own allowlist, its own
+    bind address. Every refusal below happens before either listener serves a
+    byte, so a process that starts is one whose channel separation held.
+    """
+    # A function-level import, deliberately: `secondsign.gateway.approver`
+    # imports this module's helpers, and the settings registry lives here so
+    # the two cannot disagree about what is recognised.
+    from secondsign.gateway.approver import (
+        ApproverServer,
+        check_channel_separation,
+        create_approver_server,
+        load_approver_config,
+    )
+
     env: Mapping[str, str] = os.environ if environ is None else environ
     config = load_config(env)
     if isinstance(config, ConfigurationRefusal):
         print(f"refusing to start: {config.reason.value}: {config.detail}", file=sys.stderr)
         return 2
-    authorization = build_authorization(env)
+    approver_config = load_approver_config(env)
+    if isinstance(approver_config, ConfigurationRefusal):
+        print(
+            f"refusing to start: {approver_config.reason.value}: {approver_config.detail}",
+            file=sys.stderr,
+        )
+        return 2
+    if approver_config is not None:
+        separation = check_channel_separation(
+            approver_config,
+            agent_client_ca=config.tls.client_ca if config.tls is not None else None,
+            agent_allowlist=config.allowlist,
+        )
+        if separation is not None:
+            print(
+                f"refusing to start: {separation.reason.value}: {separation.detail}",
+                file=sys.stderr,
+            )
+            return 2
+
+    # The review band exists exactly when the approver channel does: a
+    # deployment that can park an action for a human must hold a door a human
+    # can answer through, and one that cannot must never park anything.
+    authorization = build_authorization(env, review_band=approver_config is not None)
     server = create_server(config, authorization=authorization)
     if isinstance(server, ConfigurationRefusal):
         print(f"refusing to start: {server.reason.value}: {server.detail}", file=sys.stderr)
         return 2
 
+    approver_server: "ApproverServer | None" = None
+    if approver_config is not None:
+        built = create_approver_server(approver_config, authorization=authorization)
+        if isinstance(built, ConfigurationRefusal):
+            server.close()
+            print(
+                f"refusing to start: {built.reason.value}: {built.detail}",
+                file=sys.stderr,
+            )
+            return 2
+        approver_server = built
+
     host, port = server.bound_address
     mode = "mTLS" if config.tls is not None else "plaintext loopback"
     rail = "rail configured" if authorization is not None else "no rail: refusing all"
     print(f"gateway listening on {host}:{port} ({mode}, {rail})", flush=True)
+    if approver_server is not None:
+        approver_host, approver_port = approver_server.bound_address
+        print(
+            f"approver channel listening on {approver_host}:{approver_port} (mTLS)",
+            flush=True,
+        )
     try:
+        if approver_server is not None:
+            approver_thread = threading.Thread(target=approver_server.serve_forever, daemon=True)
+            approver_thread.start()
         server.serve_forever()
     except KeyboardInterrupt:
         return 130
     finally:
+        if approver_server is not None:
+            approver_server.shutdown()
+            approver_server.close()
         server.close()
     return 0
 
