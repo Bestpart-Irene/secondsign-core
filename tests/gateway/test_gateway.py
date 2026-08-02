@@ -54,6 +54,30 @@ def test_a_denied_decision_never_dispatches():
     assert executor.dispatched == []
 
 
+class _RaisingExecutor:
+    """An executor that breaks the protocol by raising instead of returning —
+    the shape of a missing optional SDK, a non-HTTP answer the driver missed,
+    or a third-party rail that throws."""
+
+    def dispatch(self, intent):  # noqa: ANN001, ANN201 — a deliberately broken executor
+        raise RuntimeError("the rail SDK is not installed")
+
+
+def test_an_executor_that_raises_is_unknown_not_an_escape():
+    """The money may have moved and the key is already reserved; the gateway
+    must answer `unknown` rather than let the exception escape into a
+    money-moving path that then writes no receipt (INV-11)."""
+    gateway = ExecutionGateway(_RaisingExecutor(), fresh_store())
+    intent = make_intent()
+    outcome = gateway.execute(intent, make_decision(intent, DecisionVerdict.ALLOW), now=NOW)
+    assert isinstance(outcome, ExecutionOutcome)
+    assert outcome.status is ExecutionStatus.unknown
+    # The reservation is finalized to unknown, so a retry reads that back rather
+    # than re-dispatching a payment that may already have happened.
+    retry = gateway.execute(intent, make_decision(intent, DecisionVerdict.ALLOW), now=NOW)
+    assert retry.status is ExecutionStatus.unknown
+
+
 def test_a_review_decision_needs_a_matching_grant():
     gateway, executor = _gateway()
     intent = make_intent()

@@ -177,7 +177,23 @@ class ExecutionGateway:
                 status=ExecutionStatus.unknown, digest=decision.digest, reference=None
             )
 
-        result = self._executor.dispatch(intent)
+        # The executor is trusted but not infallible, and the reservation is
+        # already made: if `dispatch` raises rather than returning a state — a
+        # non-HTTP answer the reference driver missed, a missing optional SDK, a
+        # third-party executor that breaks the "returns a RailResult" contract —
+        # the money may have moved and the key is spent. Letting the exception
+        # escape would leave no receipt on a money-moving path (INV-11) and the
+        # key stuck in flight. `unknown` is the honest floor: reconciled through
+        # the idempotency key, never re-dispatched, never recorded as failure.
+        try:
+            result = self._executor.dispatch(intent)
+        except Exception:  # noqa: BLE001 — an executor that raises is uncertainty, and uncertainty is unknown
+            outcome = ExecutionOutcome(
+                status=ExecutionStatus.unknown, digest=decision.digest, reference=None
+            )
+            self._store.finalize(key, outcome)
+            return outcome
+
         outcome = ExecutionOutcome(
             status=result.status, digest=decision.digest, reference=result.reference
         )
