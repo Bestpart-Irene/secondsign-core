@@ -486,6 +486,45 @@ slices:
     gates: [ruff_check, ruff_format, pytest, lint_imports]
     stop_for_human: false
 
+  - id: CORE-S024
+    title: A shared module may not reach the control plane
+    depends_on: [CORE-S017]
+    threats: [A2, A3]
+    scope:
+      - src/secondsign/isolation.py
+      - tests/architecture/**
+      - pyproject.toml
+      - docs/INVARIANTS.md
+    forbidden:
+      - a module classified shared importing a control-plane module at any depth
+      - weakening the agent-surface contract to make the shared-side contract pass
+      - an isolation decision that reads a configurable setting
+      - moving any code between packages — this slice moves classifications, not modules
+    acceptance:
+      - every module classified shared has an import closure free of control-plane modules, enforced by lint-imports and by an architecture test that discovers shared modules from the classification rather than naming them
+      - secondsign.conformance and secondsign.decision are classified control_plane, with the reasoning recorded where the classification lives — the certification kits reach the approval and audit packages by construction, and the engine reads the limits, so neither is a frozen boundary object
+      - a mutation adding a control-plane import to a shared module in a copy of the package is detected, both when added directly and when added to a module the shared module imports
+      - INV-12's enforcement column names the shared-side test
+    required_tests: [architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports]
+    stop_for_human: true
+    checkpoint_reason: >
+      Reclassifies two public packages to the control-plane side of INV-12.
+      The classification is load-bearing for what a deployment may let a
+      managed agent import, so a human confirms the two moves are the right
+      reading of "shared" rather than a convenience that makes the new
+      contract pass.
+    rationale: >
+      Issue #58. Two of the three sides of the isolation classification are
+      enforced; shared is a docstring. The breach is quiet by construction:
+      a shared module that pulls in the control plane stays green until an
+      agent-surface module imports it, at which point the violation surfaces
+      in a pull request that did not create it. Scoping found the docstring
+      already false — secondsign.conformance reaches approval, audit, gateway
+      and policy through its certification kits, and secondsign.decision
+      reaches policy — so the slice is the classification correction plus the
+      gate that keeps it true, exactly the outcome the issue anticipated.
+
   - id: CORE-S022
     title: Carry a REVIEW verdict to a human and back, and execute what was approved
     depends_on: [CORE-S019]
