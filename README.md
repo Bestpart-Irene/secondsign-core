@@ -19,6 +19,68 @@ The gate between an AI agent and real money.</p>
 
 ---
 
+## See it run
+
+One screen, three vantage points: the agent that proposes, the human who
+decides, and the money that only moves when both sides of the boundary agree.
+
+```text
+┌──────────────────────────────┬──────────────────────────────┐
+│ ① the agent's terminal       │ ② the approver's browser      │
+│                              │                               │
+│ $42 payment                  │   SecondSign · open reviews   │
+│ → completed ✓                │  ┌─────────────────────────┐  │
+│                              │  │ $300.00 · held for review│  │
+│ $300 payment                 │  │ to fp:abab…              │  │
+│ → awaiting_review ⏸          │  │   [Approve]  [Decline]   │  │
+│   (parked for a human)       │  └─────────────────────────┘  │
+│ → completed ✓ on approval    │                               │
+│                              │                               │
+│ $900 payment                 │                               │
+│ → refused ✗ (over the cap)   │                               │
+├──────────────────────────────┴──────────────────────────────┤
+│ ③ the rail's own ledger, live                                │
+│   14:02:11  request #1 arrived   via=gateway                 │
+│   14:02:39  request #2 arrived   via=gateway    (and no #3)  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+The agent container in ① holds **no payment credential and no network route
+to the rail** — its only way to money is a proposal to the gateway. The panel
+in ② talks to the gateway over a **second mTLS channel with its own CA and
+its own network**, which the agent cannot reach. The ledger in ③ is read at
+the destination, because "my attempt failed" and "nothing arrived" are
+different statements.
+
+### Install
+
+```bash
+pip install secondsign-core            # the engine (Python 3.11+)
+pip install "secondsign-core[stripe]"  # plus the Stripe rail driver
+```
+
+### Run the demo (Docker required)
+
+```bash
+git clone https://github.com/Bestpart-Irene/secondsign-core
+cd secondsign-core/deploy/reference
+
+python tls/generate.py                 # ephemeral two-CA PKI, never committed
+docker compose -f compose.yaml -f compose.demo.yaml up --build -d
+
+# ② open http://127.0.0.1:8090        — the approver panel
+python demo/run_demo.py                # ① three proposals: $42 / $300 / $900
+python demo/watch.py                   # ③ the rail's ledger, live
+
+docker compose -f compose.yaml -f compose.demo.yaml down -v
+```
+
+The $300 proposal will sit at `awaiting_review` until you press **Approve**
+in the panel — then the agent's own re-send of the same handle reads
+`completed`, and one request appears on the ledger. Decline it instead and
+nothing moves. Details and the security properties of the topology:
+[`deploy/reference/`](deploy/reference/).
+
 ## Why this exists
 
 Give an AI agent a payment tool and you have given it the ability to lose real
