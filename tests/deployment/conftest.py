@@ -19,6 +19,7 @@ these tests, do not select them; if you selected them, they must run or fail.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -37,10 +38,20 @@ COMPOSE_FILE = REFERENCE / "compose.yaml"
 #: against.
 JOINED_OVERRIDE = REFERENCE / "compose.joined.yaml"
 
+#: The same construction for the second door (CORE-S023): the agent joined to
+#: the approver's network. Only `test_approver_gate_liveness.py` stands it up.
+APPROVER_JOINED_OVERRIDE = REFERENCE / "compose.approver-joined.yaml"
+
 #: Services, named once so a rename breaks in one place.
 AGENT = "agent"
 GATEWAY = "gateway"
 RAIL = "rail"
+APPROVER = "approver"
+
+#: Where the approver listener binds: the gateway's fixed address on
+#: approvernet, and that address only — which is the isolation claim.
+APPROVER_ADDRESS = "172.28.99.10"
+APPROVER_PORT = 8788
 
 #: The port the gateway binds inside its own container.
 GATEWAY_LISTEN_PORT = 8787
@@ -61,12 +72,15 @@ def _docker() -> str:
     return executable
 
 
-def _run(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
+def _run(
+    *args: str, check: bool = False, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 — resolved executable, fixed arguments
         [_docker(), *args],
         capture_output=True,
         text=True,
         check=check,
+        env={**os.environ, **env} if env else None,
     )
 
 
@@ -74,21 +88,33 @@ def _run(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
 class Topology:
     """One Compose invocation: a project name and the files that define it.
 
-    Two exist. The reference topology is the deployment this project ships; the
-    joined one is the same deployment with a single route added, stood up under
-    its own project name so the two can never share a container, a network or a
-    ledger. Everything else about them is identical by construction, because the
-    second is the first plus one override file.
+    The reference topology is the deployment this project ships; each joined
+    one is the same deployment with a single route added, stood up under its
+    own project name so no two can share a container, a network or a ledger.
+    Everything else about them is identical by construction, because each is
+    the reference plus one override file.
+
+    ``env`` is interpolation input for the compose files — today, only where
+    the approver subnet lives (`SECONDSIGN_APPROVERNET_*`). The mutation
+    session stands up two stacks at once, and a subnet written once in the
+    compose file would make the second stack's network refuse to create,
+    overlapping the first — which took down the *rail* mutation suite, three
+    tests of which never mention the approver.
     """
 
     project: str
     files: tuple[Path, ...]
+    env: tuple[tuple[str, str], ...] = ()
+    #: Where this stack's approver listener lives. The isolation cases read it
+    #: from the stack rather than a constant, so the same imported case means
+    #: the same thing against the reference stack and a re-homed joined one.
+    approver_address: str = "172.28.99.10"
 
     def compose(self, *args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
         flags: list[str] = []
         for path in self.files:
             flags += ["-f", str(path)]
-        return _run("compose", "-p", self.project, *flags, *args, check=check)
+        return _run("compose", "-p", self.project, *flags, *args, check=check, env=dict(self.env))
 
 
 #: What `deploy/reference/` documents, and what the deployment gate asserts.
@@ -97,6 +123,20 @@ REFERENCE_TOPOLOGY = Topology("secondsign-reference", (COMPOSE_FILE,))
 #: The same deployment with the agent joined to the rail's network. Used only by
 #: the mutation check, which requires the isolation cases to fail against it.
 JOINED_TOPOLOGY = Topology("secondsign-reference-joined", (COMPOSE_FILE, JOINED_OVERRIDE))
+
+#: And with the agent joined to the approver's network (CORE-S023). Used only
+#: by the approver-channel mutation check, for the same reason. Its approver
+#: subnet is re-homed because the rail-joined stack is up at the same time in
+#: the mutation session, and two stacks cannot hold one subnet.
+APPROVER_JOINED_TOPOLOGY = Topology(
+    "secondsign-reference-approver-joined",
+    (COMPOSE_FILE, APPROVER_JOINED_OVERRIDE),
+    env=(
+        ("SECONDSIGN_APPROVERNET_SUBNET", "172.28.100.0/24"),
+        ("SECONDSIGN_APPROVERNET_GATEWAY", "172.28.100.10"),
+    ),
+    approver_address="172.28.100.10",
+)
 
 
 def _wait_for_listener(topology: Topology, service: str, port: int, seconds: float) -> None:
@@ -121,6 +161,11 @@ class Stack:
     """A running deployment, and the questions this suite asks of it."""
 
     topology: Topology
+
+    @property
+    def approver_address(self) -> str:
+        """Where this stack's approver listener lives (CORE-S023)."""
+        return self.topology.approver_address
 
     def exec(self, service: str, *argv: str) -> subprocess.CompletedProcess[str]:
         """Run a command inside one container. Never raises on non-zero exit.
@@ -243,11 +288,11 @@ def _bring_up(topology: Topology):
             f"exit={generated.returncode}\n{generated.stdout}\n{generated.stderr}"
         )
 
-    ready = topology.compose("up", "-d", "--build", "--wait", RAIL, AGENT)
+    ready = topology.compose("up", "-d", "--build", "--wait", RAIL, AGENT, APPROVER)
     if ready.returncode != 0:
         pytest.fail(
-            f"the agent and rail containers did not come up, so nothing in this "
-            f"suite can be believed:\n{ready.stdout}\n{ready.stderr}"
+            f"the agent, rail and approver containers did not come up, so nothing "
+            f"in this suite can be believed:\n{ready.stdout}\n{ready.stderr}"
         )
 
     # Best-effort. Its absence is reported by the cases that need it.
@@ -274,3 +319,13 @@ def joined_stack() -> Stack:
     operators not to build, and its whole purpose is to be caught.
     """
     yield from _bring_up(JOINED_TOPOLOGY)
+
+
+@pytest.fixture(scope="session")
+def approver_joined_stack() -> Stack:
+    """The same deployment with the agent joined to the approver's network.
+
+    The second door's counterpart of `joined_stack`, stood up only by
+    `test_approver_gate_liveness.py`, and existing only to be caught.
+    """
+    yield from _bring_up(APPROVER_JOINED_TOPOLOGY)

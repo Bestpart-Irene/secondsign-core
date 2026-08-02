@@ -80,7 +80,9 @@ def _write_cert(path: Path, cert: x509.Certificate) -> None:
     path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
 
 
-def build_ca(now: dt.datetime) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
+def build_ca(
+    now: dt.datetime, *, common_name: str = "SecondSign reference CA"
+) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
     """The CA. Longer-lived than the leaves it signs.
 
     Rotating a CA means overlapping an old and a new one in the bundle, which is
@@ -88,7 +90,7 @@ def build_ca(now: dt.datetime) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
     would make rotation impossible to rehearse.
     """
     key = _key()
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "SecondSign reference CA")])
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -180,18 +182,25 @@ def build_leaf(
     return key, cert
 
 
+#: The approver's principal (CORE-S023). A different population from the agent:
+#: the gateway refuses to start when a URI appears on both allowlists.
+DEFAULT_CHECKER = "spiffe://secondsign.example/approver/reference"
+
+
 def generate(
     *,
     root: Path = HERE,
     lifetime_minutes: int = DEFAULT_LIFETIME_MINUTES,
     principal: str = DEFAULT_PRINCIPAL,
     gateway_dns: str = DEFAULT_GATEWAY_DNS,
+    checker: str = DEFAULT_CHECKER,
 ) -> dict[str, Path]:
     now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
     lifetime = dt.timedelta(minutes=lifetime_minutes)
 
     ca_dir, gateway_dir, agent_dir = root / "ca", root / "gateway", root / "agent"
-    for directory in (ca_dir, gateway_dir, agent_dir):
+    approver_ca_dir, approver_dir = root / "approver-ca", root / "approver"
+    for directory in (ca_dir, gateway_dir, agent_dir, approver_ca_dir, approver_dir):
         shutil.rmtree(directory, ignore_errors=True)
         directory.mkdir(parents=True)
 
@@ -228,10 +237,53 @@ def generate(
     for directory in (gateway_dir, agent_dir):
         _write_cert(directory / "ca-cert.pem", ca_cert)
 
+    # --- The approver channel's PKI (CORE-S023): a second root. ------------
+    #
+    # Deliberately not the CA above. The gateway compares the two anchors by
+    # bytes and refuses to start if they are one certificate, because a CA that
+    # can mint an agent credential must not be able to mint an approver
+    # credential. Its key lives in approver-ca/, mounted into nothing, exactly
+    # like ca/.
+    approver_ca_key, approver_ca_cert = build_ca(
+        now, common_name="SecondSign reference approver CA"
+    )
+    _write_key(approver_ca_dir / "ca-key.pem", approver_ca_key)
+    _write_cert(approver_ca_dir / "ca-cert.pem", approver_ca_cert)
+
+    # The approver listener's own server leaf, under the approver root, so the
+    # checker's trust store never needs the agent channel's CA at all.
+    approver_listener_key, approver_listener_cert = build_leaf(
+        common_name=gateway_dns,
+        san=x509.SubjectAlternativeName([x509.DNSName(gateway_dns)]),
+        eku=x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
+        ca_key=approver_ca_key,
+        ca_cert=approver_ca_cert,
+        now=now,
+        lifetime=lifetime,
+    )
+    _write_key(gateway_dir / "approver-key.pem", approver_listener_key)
+    _write_cert(gateway_dir / "approver-cert.pem", approver_listener_cert)
+    _write_cert(gateway_dir / "approver-ca-cert.pem", approver_ca_cert)
+
+    checker_key, checker_cert = build_leaf(
+        common_name="reference-approver",
+        san=x509.SubjectAlternativeName([x509.UniformResourceIdentifier(checker)]),
+        eku=x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
+        ca_key=approver_ca_key,
+        ca_cert=approver_ca_cert,
+        now=now,
+        lifetime=lifetime,
+    )
+    _write_key(approver_dir / "client-key.pem", checker_key)
+    _write_cert(approver_dir / "client-cert.pem", checker_cert)
+    _write_cert(approver_dir / "approver-ca-cert.pem", approver_ca_cert)
+
     return {
         "ca_key": ca_dir / "ca-key.pem",
         "gateway_cert": gateway_dir / "gateway-cert.pem",
         "client_cert": agent_dir / "client-cert.pem",
+        "approver_ca_key": approver_ca_dir / "ca-key.pem",
+        "checker_cert": approver_dir / "client-cert.pem",
     }
 
 

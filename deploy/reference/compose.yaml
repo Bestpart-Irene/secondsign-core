@@ -58,11 +58,25 @@ services:
     build:
       context: ../..
       dockerfile: deploy/reference/gateway/Dockerfile
-    # The only container on both networks. That is the whole design: it is the
-    # single point at which a request can cross from the agent's world into the
-    # rail's, which is what makes "stop the gateway and execution becomes
-    # impossible" true rather than aspirational.
-    networks: [agentnet, railnet]
+    # The only container on all three networks. That is the whole design: it is
+    # the single point at which a request can cross from the agent's world into
+    # the rail's — or from the approver's into either — which is what makes
+    # "stop the gateway and execution becomes impossible" true rather than
+    # aspirational.
+    #
+    # The static address is not decoration. The approver listener binds to the
+    # gateway's approvernet interface *specifically*, so the second door simply
+    # does not exist on the network the agent is joined to — bound to 0.0.0.0 it
+    # would answer on agentnet too, and "the agent cannot reach the approval
+    # channel" (B6) would be an mTLS property rather than a routing fact.
+    networks:
+      agentnet: {}
+      railnet: {}
+      approvernet:
+        # Interpolated so a second stack (the mutation suites stand up two at
+        # once) can move the whole subnet instead of colliding with this one.
+        # An operator never sets these; the default is the deployment.
+        ipv4_address: ${SECONDSIGN_APPROVERNET_GATEWAY:-172.28.99.10}
     depends_on:
       rail: {condition: service_healthy}
     volumes:
@@ -84,12 +98,37 @@ services:
       SECONDSIGN_TLS_KEY: /etc/secondsign/tls/gateway-key.pem
       SECONDSIGN_CLIENT_CA: /etc/secondsign/tls/ca-cert.pem
       SECONDSIGN_CLIENT_ALLOWLIST: "spiffe://secondsign.example/agent/reference"
+      # The approver channel (CORE-S023): its own bind address, its own trust
+      # anchor, its own population. Configuring it is also what turns on the
+      # review band — a deployment that can park an action for a human must
+      # hold a door a human can answer through.
+      SECONDSIGN_APPROVER_BIND: "${SECONDSIGN_APPROVERNET_GATEWAY:-172.28.99.10}:8788"
+      SECONDSIGN_APPROVER_TLS_CERT: /etc/secondsign/tls/approver-cert.pem
+      SECONDSIGN_APPROVER_TLS_KEY: /etc/secondsign/tls/approver-key.pem
+      SECONDSIGN_APPROVER_CA: /etc/secondsign/tls/approver-ca-cert.pem
+      SECONDSIGN_APPROVER_ALLOWLIST: "spiffe://secondsign.example/approver/reference"
     command: ["python", "-m", "secondsign.gateway.server"]
     healthcheck:
       test: ["CMD", "python", "-c", "import socket;socket.create_connection(('127.0.0.1',8787),timeout=2)"]
       interval: 2s
       timeout: 3s
       retries: 15
+
+  approver:
+    build:
+      context: .
+      dockerfile: approver/Dockerfile
+    # One network, and it is not the agent's. The approver reaches the second
+    # listener and nothing else; the agent has no interface here at all.
+    networks: [approvernet]
+    volumes:
+      # Its own client credential, under the approver CA — the agent CA cannot
+      # mint one of these, and the gateway refuses to start if the two anchors
+      # are one certificate.
+      - ./tls/approver:/etc/secondsign/tls:ro
+      - ./approver:/approver:ro
+      - ./adversary:/adversary:ro
+    command: ["sleep", "infinity"]
 
   agent:
     build:
@@ -110,10 +149,18 @@ services:
     command: ["sleep", "infinity"]
 
 networks:
-  # No route off the host on either. An agent with general egress has bypassed
-  # this design regardless of what SecondSign does, and pretending otherwise
-  # would make the demonstration weaker than it looks.
+  # No route off the host on any of them. An agent with general egress has
+  # bypassed this design regardless of what SecondSign does, and pretending
+  # otherwise would make the demonstration weaker than it looks.
   agentnet:
     internal: true
   railnet:
     internal: true
+  # The approver's network (CORE-S023). The fixed subnet exists so the gateway
+  # can hold a known address on it — the approver listener binds to that
+  # address alone, which is what keeps the second door off agentnet.
+  approvernet:
+    internal: true
+    ipam:
+      config:
+        - subnet: "${SECONDSIGN_APPROVERNET_SUBNET:-172.28.99.0/24}"
