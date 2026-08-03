@@ -352,3 +352,68 @@ def test_every_resolution_is_reachable(resolution):
         resolve(setting, requested=3600, records=(live,), now=NOW).resolution,
     }
     assert resolution in produced, f"{resolution} cannot be produced by any input"
+
+
+# --------------------------------------------------------------------------
+# Direction-aware authority: a record is a ceiling on looseness in the
+# setting's own direction, not a bigger-is-looser threshold.
+# --------------------------------------------------------------------------
+
+
+def test_a_lookback_record_does_not_authorise_a_far_looser_window():
+    """The inverted-direction trap. `window_lookback_seconds` is looser the
+    *smaller* it is, so a record approving a shortening to 12h (43_200) must not
+    green-light a shortening to 60 seconds — which forgets almost all history
+    and is far looser than what was approved. The old `value <= relaxed_to`
+    reading let it through (`60 <= 43_200`)."""
+    setting = Setting.window_lookback_seconds
+    record = _approved(setting, value=43_200, expires_at=NOW + timedelta(hours=1))
+
+    decision = resolve(setting, requested=60, records=(record,), now=NOW)
+
+    assert decision.value == strictest(setting), (
+        "a lookback record authorised a window far looser than it approved"
+    )
+    assert decision.refused
+    assert decision.authority is None
+
+
+def test_a_lookback_record_authorises_exactly_what_it_approved():
+    setting = Setting.window_lookback_seconds
+    record = _approved(setting, value=43_200, expires_at=NOW + timedelta(hours=1))
+
+    decision = resolve(setting, requested=43_200, records=(record,), now=NOW)
+
+    assert decision.relaxed
+    assert decision.value == 43_200
+
+
+def test_a_lookback_record_authorises_a_less_loose_request_within_its_ceiling():
+    """A request looser than the default but tighter than what was approved is
+    within the ceiling — 50_000 is between the approved 43_200 and the strictest
+    86_400, i.e. less loose than approved."""
+    setting = Setting.window_lookback_seconds
+    record = _approved(setting, value=43_200, expires_at=NOW + timedelta(hours=1))
+
+    decision = resolve(setting, requested=50_000, records=(record,), now=NOW)
+
+    assert decision.relaxed
+    assert decision.value == 50_000
+
+
+def test_the_narrowest_lookback_record_is_named_as_authority():
+    """The selected authority is the *least loose* sufficient record. For
+    lookback that is the one with the largest relaxed_to, not the smallest."""
+    setting = Setting.window_lookback_seconds
+    broad = _approved(setting, value=30_000, expires_at=NOW + timedelta(hours=1), approver="broad")
+    narrow = _approved(
+        setting, value=60_000, expires_at=NOW + timedelta(hours=1), approver="narrow"
+    )
+
+    decision = resolve(setting, requested=70_000, records=(broad, narrow), now=NOW)
+
+    assert decision.relaxed
+    assert decision.authority is not None
+    assert decision.authority.approver_ref == "narrow", (
+        "the loosest record was named authority instead of the narrowest sufficient one"
+    )
