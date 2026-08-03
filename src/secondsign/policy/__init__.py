@@ -14,11 +14,13 @@ from secondsign.policy.amount import (
     PolicyContext,
     WindowAggregate,
 )
+from secondsign.policy.coverage import CurrencyCoveragePolicy
 
 __all__ = [
     "AggregateKey",
     "AmountLimit",
     "AmountWindowPolicy",
+    "CurrencyCoveragePolicy",
     "PolicyContext",
     "WindowAggregate",
 ]

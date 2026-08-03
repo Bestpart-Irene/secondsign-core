@@ -89,7 +89,7 @@ from secondsign.decision import DecisionEngine
 from secondsign.gateway.authorization import AuthorizationService
 from secondsign.gateway.execution import ExecutionGateway, InMemoryIdempotencyStore
 from secondsign.gateway.leaf import read_client_purpose
-from secondsign.policy import AmountLimit, AmountWindowPolicy
+from secondsign.policy import AmountLimit, AmountWindowPolicy, CurrencyCoveragePolicy
 from secondsign.rails.http import HTTPRailExecutor
 
 #: ADR 0004 §4: client leaf validity is capped at 24 hours, enforced rather than
@@ -675,8 +675,16 @@ def build_authorization(
         max_aggregate_minor=REFERENCE_LIMIT_MINOR,
         review_above_minor=REFERENCE_REVIEW_ABOVE_MINOR if review_band else None,
     )
+    # The limit governs USD; nothing else. Without a coverage policy an agent
+    # naming any other currency would meet only abstentions and be ALLOWed with
+    # no limit at all — permission is the absence of a concern, and an
+    # unconfigured currency raised none. The coverage policy is that concern:
+    # it denies every currency this deployment did not configure a limit for,
+    # so the set here must equal the set of limits above.
     return AuthorizationService(
-        engine=DecisionEngine([AmountWindowPolicy(limit)]),
+        engine=DecisionEngine(
+            [AmountWindowPolicy(limit), CurrencyCoveragePolicy(covered={limit.quote_currency})]
+        ),
         gateway=ExecutionGateway(HTTPRailExecutor(url, credential), InMemoryIdempotencyStore()),
         ledger=WindowLedger(window_seconds=limit.window_seconds),
         audit=AuditLog(InMemoryAuditSink()),
