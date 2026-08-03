@@ -168,6 +168,15 @@ class ReviewResolution(BaseModel):
     outcome: AuthorizationOutcome | None = None
 
 
+#: Rejections that settle a review for good: an explicit decline, and an
+#: expiry. These take the review off the queue so no second checker can approve
+#: what one declined. The others (a digest or approval-id mismatch) mean the
+#: *answer* was wrong, not the review, so the review stays open for a correct
+#: one — releasing it there would let a malformed answer cancel a pending review.
+_TERMINAL_REJECTIONS: Final[frozenset[RejectionReason]] = frozenset(
+    {RejectionReason.not_approved, RejectionReason.expired}
+)
+
 #: Which rail class a payment lands on. Rails with no payment shape are absent
 #: rather than mapped to a default: a missing entry is a refusal.
 _TARGET_BY_RAIL: Final[dict[RailClass, PaymentTargetKind]] = {
@@ -464,6 +473,31 @@ class AuthorizationService:
 
             consumed = self._maker_checker.consume(review.approval, verdict, now=now)
             if isinstance(consumed, Rejected):
+                if consumed.reason in _TERMINAL_REJECTIONS:
+                    # A decline or an expiry settles the review, and a settled
+                    # review must leave the queue: otherwise a checker who
+                    # declines it leaves it open for a second checker to
+                    # approve — approver shopping, and the trail would show only
+                    # the approval. So the review is released, its handle is
+                    # settled to `refused` (the agent's poll ends rather than
+                    # reading `awaiting_review` forever), and a receipt records
+                    # that a resolution happened. A malformed answer
+                    # (`digest_mismatch`, `wrong_approval`) is not terminal: the
+                    # review is still answerable by a correct one, so it stays
+                    # open.
+                    self._audit.record(
+                        digest=decision.digest,
+                        verdict=decision.verdict,
+                        reasons=decision.reasons,
+                        outcome_status=None,
+                        approval_id=review.approval_id,
+                        principal_ref=review.principal_ref,
+                    )
+                    answer = self._refuse(review.reservation_key, now, digest=decision.digest)
+                    self._reservations[review.reservation_key] = _Reservation(
+                        proposal=proposal, answer=answer
+                    )
+                    self._pending.release(approval_id)
                 return ReviewResolution(status=ReviewOutcomeStatus.rejected, reason=consumed.reason)
 
             result = self._dispatch(intent, decision, now=now, grant=consumed)

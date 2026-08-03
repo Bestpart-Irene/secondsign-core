@@ -692,3 +692,77 @@ def test_the_clock_the_service_is_given_is_the_clock_it_uses() -> None:
 
     assert outcome.decided_at == stamp
     assert only_open_review(service).approval.expires_at == stamp + REVIEW_TTL_EXPECTED
+
+
+class TestADeclineSettlesTheReview:
+    """A checker's decline (or an expiry) takes the review off the queue and
+    settles the agent's handle to refused — no approver shopping, and the
+    agent's poll ends (H3)."""
+
+    def test_a_declined_review_leaves_the_queue(self) -> None:
+        service = build_service()
+        service.authorize(ALICE, make_request(), now=NOW)
+        review = only_open_review(service)
+
+        resolution = service.resolve(review.approval_id, approve(review, approved=False), now=SOON)
+
+        assert resolution.status is ReviewOutcomeStatus.rejected
+        assert service.open_reviews() == (), "a declined review is still answerable"
+
+    def test_a_second_checker_cannot_approve_a_declined_review(self) -> None:
+        """The whole point: once one checker declines, another must not be able
+        to approve the same review."""
+        executor = RecordingExecutor()
+        service = build_service(executor=executor)
+        service.authorize(ALICE, make_request(), now=NOW)
+        review = only_open_review(service)
+
+        service.resolve(review.approval_id, approve(review, approved=False), now=SOON)
+        second = service.resolve(review.approval_id, approve(review, approved=True), now=SOON)
+
+        assert second.status is ReviewOutcomeStatus.rejected
+        assert second.reason is RejectionReason.unknown_approval
+        assert executor.dispatched == [], "a declined review was approved by a second checker"
+
+    def test_the_agent_reads_refused_after_a_decline(self) -> None:
+        """The agent re-sending its handle after a decline reads refused, not
+        awaiting_review forever."""
+        service = build_service()
+        request = make_request()
+        service.authorize(ALICE, request, now=NOW)
+        review = only_open_review(service)
+
+        service.resolve(review.approval_id, approve(review, approved=False), now=SOON)
+        reread = service.authorize(ALICE, request, now=SOON)
+
+        assert reread.status is AgentOutcomeStatus.refused
+
+    def test_a_decline_is_recorded(self) -> None:
+        sink = InMemoryAuditSink()
+        service = build_service(sink=sink)
+        service.authorize(ALICE, make_request(), now=NOW)
+        review = only_open_review(service)
+        before = len(sink.entries())
+
+        service.resolve(review.approval_id, approve(review, approved=False), now=SOON)
+
+        assert len(sink.entries()) > before, "a decline left no trace in the audit trail"
+
+    def test_a_malformed_answer_does_not_cancel_the_review(self) -> None:
+        """A digest mismatch is a wrong answer, not a decline: the review stays
+        open for a correct one, so a malformed answer cannot cancel a pending
+        review."""
+        service = build_service()
+        service.authorize(ALICE, make_request(), now=NOW)
+        review = only_open_review(service)
+
+        wrong = CheckerVerdict(
+            checker=CHECKER,
+            approval_id=review.approval_id,
+            proposal=review.approval.proposal.model_copy(update={"value": "0" * 64}),
+            approved=True,
+        )
+        resolution = service.resolve(review.approval_id, wrong, now=SOON)
+
+        assert resolution.status is ReviewOutcomeStatus.rejected
+        assert len(service.open_reviews()) == 1, "a malformed answer cancelled a pending review"
