@@ -13,6 +13,8 @@ in which unknown is not failure (B8).
 import inspect
 from datetime import timedelta
 
+import pytest
+
 from secondsign.decision import DecisionVerdict
 from secondsign.gateway import (
     ExecutionGateway,
@@ -52,6 +54,64 @@ def test_a_denied_decision_never_dispatches():
     outcome = gateway.execute(intent, make_decision(intent, DecisionVerdict.DENY), now=NOW)
     assert outcome == GatewayRefusal(reason=RefusalReason.denied)
     assert executor.dispatched == []
+
+
+class _RaisingExecutor:
+    """An executor that breaks the protocol by raising instead of returning —
+    the shape of a missing optional SDK, a non-HTTP answer the driver missed,
+    or a third-party rail that throws."""
+
+    def dispatch(self, intent):  # noqa: ANN001, ANN201 — a deliberately broken executor
+        raise RuntimeError("the rail SDK is not installed")
+
+
+class _ReturnsGarbageExecutor:
+    """An executor that breaks the protocol by *returning* a non-RailResult
+    rather than raising — the case a structural Protocol cannot prevent, and the
+    one the raise-only guard missed: `None.status` and a bad `ExecutionOutcome`
+    both blow up on the return, not on the call."""
+
+    def __init__(self, value: object) -> None:
+        self._value = value
+
+    def dispatch(self, intent):  # noqa: ANN001, ANN201 — a deliberately broken executor
+        return self._value
+
+
+class _BadStatus:
+    status = "definitely-succeeded"  # not an ExecutionStatus → ExecutionOutcome rejects it
+    reference = 12345  # not a str
+
+
+@pytest.mark.parametrize("value", [None, _BadStatus()])
+def test_an_executor_that_returns_garbage_is_unknown_not_an_escape(value):
+    """A `dispatch` that returns None or a non-RailResult object must not escape
+    after the key is reserved and the rail ran — same INV-11 hole as a raise,
+    reached on the return path instead of the call."""
+    store = fresh_store()
+    gateway = ExecutionGateway(_ReturnsGarbageExecutor(value), store)
+    intent = make_intent()
+    outcome = gateway.execute(intent, make_decision(intent, DecisionVerdict.ALLOW), now=NOW)
+    assert isinstance(outcome, ExecutionOutcome)
+    assert outcome.status is ExecutionStatus.unknown
+    # And the key is finalized, not stuck reserved: a retry reads unknown back.
+    retry = gateway.execute(intent, make_decision(intent, DecisionVerdict.ALLOW), now=NOW)
+    assert retry.status is ExecutionStatus.unknown
+
+
+def test_an_executor_that_raises_is_unknown_not_an_escape():
+    """The money may have moved and the key is already reserved; the gateway
+    must answer `unknown` rather than let the exception escape into a
+    money-moving path that then writes no receipt (INV-11)."""
+    gateway = ExecutionGateway(_RaisingExecutor(), fresh_store())
+    intent = make_intent()
+    outcome = gateway.execute(intent, make_decision(intent, DecisionVerdict.ALLOW), now=NOW)
+    assert isinstance(outcome, ExecutionOutcome)
+    assert outcome.status is ExecutionStatus.unknown
+    # The reservation is finalized to unknown, so a retry reads that back rather
+    # than re-dispatching a payment that may already have happened.
+    retry = gateway.execute(intent, make_decision(intent, DecisionVerdict.ALLOW), now=NOW)
+    assert retry.status is ExecutionStatus.unknown
 
 
 def test_a_review_decision_needs_a_matching_grant():

@@ -187,31 +187,68 @@ def load_approver_config(
     )
 
 
+def _certificate_der_set(path: Path) -> frozenset[bytes]:
+    """Every certificate in a PEM file, as canonical DER bytes.
+
+    Compared as a *set of certificates*, not as file bytes, for two reasons a
+    raw comparison misses. A CA file is a bundle: `load_verify_locations`
+    trusts *every* certificate in it, so an approver CA file that happens to
+    contain the agent CA among others makes the agent CA a valid approver
+    issuer — byte-inequality passes while B6's separation is gone. And the same
+    certificate re-encoded (line endings, a comment header) is byte-different
+    but the same trust anchor. DER is the certificate's canonical form, so a set
+    of DER blobs answers "do these two files share any trust anchor" correctly
+    both ways. Standard library only — `cryptography` must never become a
+    runtime dependency (pyproject), and `ssl.PEM_cert_to_DER_cert` is enough to
+    normalise each block.
+    """
+    text = path.read_text(encoding="ascii", errors="strict")
+    begin = "-----BEGIN CERTIFICATE-----"
+    end = "-----END CERTIFICATE-----"
+    ders: set[bytes] = set()
+    start = 0
+    while True:
+        open_at = text.find(begin, start)
+        if open_at == -1:
+            break
+        close_at = text.find(end, open_at)
+        if close_at == -1:
+            break
+        block = text[open_at : close_at + len(end)] + "\n"
+        ders.add(ssl.PEM_cert_to_DER_cert(block))
+        start = close_at + len(end)
+    return frozenset(ders)
+
+
 def check_channel_separation(
     approver: ApproverConfig, *, agent_client_ca: Path | None, agent_allowlist: frozenset[str]
 ) -> ConfigurationRefusal | None:
     """The two structural rules that make this a *second* channel (B6).
 
-    Compared by content, not by configuration: two paths naming one CA file is
-    one trust anchor, and one URI on both allowlists is one principal holding
-    both credentials. Either way the separation the topology claims does not
-    exist, and the process must not start claiming it.
+    Compared by content, not by configuration: a certificate on both trust
+    anchors is one anchor (whatever the file bytes), and one URI on both
+    allowlists is one principal holding both credentials. Either way the
+    separation the topology claims does not exist, and the process must not
+    start claiming it.
     """
     if agent_client_ca is not None:
         try:
-            same = agent_client_ca.read_bytes() == approver.tls.client_ca.read_bytes()
-        except OSError as exc:
+            shared = _certificate_der_set(agent_client_ca) & _certificate_der_set(
+                approver.tls.client_ca
+            )
+        except (OSError, ValueError) as exc:
             return ConfigurationRefusal(
                 reason=StartupRefusalReason.unreadable_tls_material,
                 detail=f"cannot compare trust anchors: {exc}",
             )
-        if same:
+        if shared:
             return ConfigurationRefusal(
                 reason=StartupRefusalReason.shared_trust_anchor,
                 detail=(
-                    "the approver CA and the agent client CA are the same "
-                    "certificate: a CA that can mint an agent credential must "
-                    "not be able to mint an approver credential"
+                    "the approver CA and the agent client CA share a certificate: "
+                    "a CA that can mint an agent credential must not be able to "
+                    "mint an approver credential (a bundle containing both is the "
+                    "usual way this happens)"
                 ),
             )
     overlap = sorted(approver.allowlist & agent_allowlist)

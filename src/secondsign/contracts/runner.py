@@ -89,6 +89,22 @@ def _evaluate_isolated(plugin: object, view: PolicyView) -> PluginJudgement:
 
     if not isinstance(result, PluginJudgement):
         return _deny(ReasonCode.plugin_invalid_result)
+    # isinstance is not enough: a subclass overriding `findings`/`sort_key`, or an
+    # instance built with `model_construct`, is a `PluginJudgement` that never ran
+    # a validator — re-opening the `MAX_DETAIL_MAGNITUDE` bound on `Finding.observed`
+    # (the A5 identifier channel) and the "non-ABSTAIN needs findings" rule. Round-
+    # tripping through `model_validate` forces every validator to run and yields a
+    # canonical base instance, so what combines downstream is what the contract
+    # actually permits, not what an extension asserted it built.
+    try:
+        result = PluginJudgement.model_validate(result.model_dump())
+    except Exception:  # noqa: BLE001 — model_dump on a hostile subclass may raise anything; all of it is uncertainty
+        # Not only ValidationError: `result.model_dump()` runs on the plugin's
+        # own object first, and a subclass overriding model_dump (or a property
+        # it touches) can raise any exception. Every one of them means the same
+        # thing here — the result cannot be trusted as a judgement — so all of
+        # them deny rather than letting one escape the runner.
+        return _deny(ReasonCode.plugin_invalid_result)
     if result.contract_version != CONTRACT_VERSION:
         return _deny(ReasonCode.plugin_contract_mismatch)
     return result

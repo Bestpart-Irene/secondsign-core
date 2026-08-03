@@ -30,6 +30,7 @@ producing a band no action can reach.
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from secondsign.contracts import (
+    MAX_DETAIL_MAGNITUDE,
     Currency,
     Finding,
     PluginJudgement,
@@ -42,20 +43,45 @@ from secondsign.intent import TransactionIntent
 _ABSTAIN = PluginJudgement(verdict=PluginVerdict.ABSTAIN)
 
 
+def _bounded(value: int | None) -> int | None:
+    """Clamp a reported quantity to the finding's magnitude ceiling.
+
+    ``Finding.observed``/``limit`` are capped at ``MAX_DETAIL_MAGNITUDE`` (the
+    A5 anti-identifier bound). A prospective window sum, or a limit, can exceed
+    that — an agent naming an absurd amount is enough — and constructing the
+    finding with the raw value would raise a ``ValidationError`` that the engine
+    turns into a ``plugin_error`` DENY, mislabelling a limit breach (and
+    collapsing a REVIEW into a DENY). Clamping keeps the finding constructible
+    and honest: the value is *at least* the ceiling, which is all a reader needs
+    to see it is over the limit.
+    """
+    if value is None:
+        return None
+    return min(value, MAX_DETAIL_MAGNITUDE)
+
+
 def _deny(
     code: ReasonCode, *, observed: int | None = None, limit: int | None = None
 ) -> PluginJudgement:
     return PluginJudgement(
         verdict=PluginVerdict.DENY,
-        findings=(Finding(code=code, observed=observed, limit=limit),),
+        findings=(Finding(code=code, observed=_bounded(observed), limit=_bounded(limit)),),
     )
 
 
 class AggregateKey(BaseModel):
-    """What a window aggregate is grouped by: counterparty, source, rail."""
+    """What a window aggregate is grouped by: currency, counterparty, source, rail.
+
+    Currency is part of the key, not an afterthought: a window sums minor units,
+    and minor units of two currencies are not comparable quantities. Keying by
+    currency means a EUR spend and a USD spend against the same counterparty are
+    two windows, so a multi-currency deployment cannot measure one against the
+    other's cap.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    quote_currency: Currency
     counterparty_ref: str
     source_account_ref: str
     rail_class: RailClass
@@ -64,6 +90,7 @@ class AggregateKey(BaseModel):
     def from_intent(cls, intent: TransactionIntent) -> "AggregateKey":
         d = intent.dimensions
         return cls(
+            quote_currency=d.quote_currency,
             counterparty_ref=d.counterparty_ref,
             source_account_ref=d.source_account_ref,
             rail_class=d.rail_class,
@@ -172,8 +199,8 @@ class AmountWindowPolicy:
                 findings=(
                     Finding(
                         code=ReasonCode.value_band_exceeded,
-                        observed=prospective,
-                        limit=review_above,
+                        observed=_bounded(prospective),
+                        limit=_bounded(review_above),
                     ),
                 ),
             )

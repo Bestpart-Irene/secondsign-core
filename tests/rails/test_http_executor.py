@@ -203,3 +203,93 @@ class TestWhatTravels:
 
         assert CREDENTIAL not in repr(executor)
         assert "rail:9000" in repr(executor)
+
+
+class _RawServer(ThreadingHTTPServer):
+    """A listener that answers with arbitrary bytes, HTTP or not."""
+
+    daemon_threads = True
+
+    def __init__(self, address, handler, raw: bytes) -> None:
+        self.raw = raw
+        self.hit = False
+        super().__init__(address, handler)
+
+
+class _RawHandler(BaseHTTPRequestHandler):
+    def handle_one_request(self) -> None:  # noqa: D401 — override the whole cycle
+        # Read and discard the request line + headers, then answer with the
+        # server's raw bytes — which may not be a valid HTTP status line.
+        try:
+            self.rfile.readline()
+            while True:
+                line = self.rfile.readline()
+                if line in (b"\r\n", b"\n", b""):
+                    break
+        except OSError:
+            return
+        self.server.hit = True
+        self.wfile.write(self.server.raw)
+        self.close_connection = True
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        """Silent."""
+
+
+@pytest.fixture
+def raw_rail():
+    """A loopback listener that replies with exactly the bytes it is given."""
+
+    servers: list[tuple[_RawServer, threading.Thread]] = []
+
+    def _build(raw: bytes):
+        server = _RawServer(("127.0.0.1", 0), _RawHandler, raw)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address[:2]
+        servers.append((server, thread))
+        return server, f"http://{host}:{port}/dispatch"
+
+    yield _build
+    for server, thread in servers:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+class TestDispatchIsTotal:
+    """A rail that answers with anything at all resolves to a state, never an
+    escaping exception — money may have moved, so the caller must get an answer
+    it can chain a receipt to (C3, INV-11)."""
+
+    def test_a_non_http_answer_reads_as_unknown(self, raw_rail) -> None:
+        _, url = raw_rail(b"NOT-HTTP garbage\r\n\r\n")
+        result = HTTPRailExecutor(url, CREDENTIAL).dispatch(make_intent())
+        assert result.status is ExecutionStatus.unknown
+
+    def test_an_empty_answer_reads_as_unknown(self, raw_rail) -> None:
+        _, url = raw_rail(b"")
+        result = HTTPRailExecutor(url, CREDENTIAL).dispatch(make_intent())
+        assert result.status is ExecutionStatus.unknown
+
+
+class TestRedirectsAreNotFollowed:
+    """A 3xx forwards nothing: the credential does not travel to a Location the
+    operator never configured, and a redirect's 200 is never read as success
+    for a payment the real rail never processed (C2)."""
+
+    def test_a_redirect_reads_as_unknown_and_is_not_followed(self, raw_rail) -> None:
+        # A raw target that flips `.hit` on ANY connection (GET or POST), so a
+        # followed 301 — which urllib turns into a GET carrying the credential —
+        # is detectable, unlike a POST-only handler that would silently ignore
+        # the redirected GET.
+        target, target_url = raw_rail(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+        _, url = raw_rail(
+            f"HTTP/1.1 301 Moved Permanently\r\nLocation: {target_url}\r\n"
+            "Content-Length: 0\r\n\r\n".encode()
+        )
+        result = HTTPRailExecutor(url, CREDENTIAL).dispatch(make_intent())
+        assert result.status is ExecutionStatus.unknown, "a 3xx must not read as success"
+        assert target.hit is False, (
+            "the executor followed the redirect and forwarded the credential"
+        )

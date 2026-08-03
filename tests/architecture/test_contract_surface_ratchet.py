@@ -327,6 +327,16 @@ def test_enum_members_are_frozen(enum_name):
     assert isinstance(enum_cls, type) and issubclass(enum_cls, Enum)
     live = {member.name: member.value for member in enum_cls}
     assert live == FROZEN_ENUMS[enum_name], f"{enum_name} members changed"
+    # Order is part of the frozen surface, not only the member set. Declaration
+    # order is load-bearing where code reads a member positionally — the
+    # gateway's strictest source-trust/reversibility defaults, the strictness
+    # rank a trust lattice would derive — and a dict comparison is
+    # order-insensitive, so a reorder that flips "strictest" to "loosest" would
+    # slip through the check above. Comparing the ordered member names catches it.
+    assert list(live) == list(FROZEN_ENUMS[enum_name]), (
+        f"{enum_name} members were reordered — declaration order is frozen because "
+        "positional readers (strictest-default, strictness rank) depend on it"
+    )
 
 
 @pytest.mark.parametrize("model_name", sorted(FROZEN_MODEL_FIELDS))

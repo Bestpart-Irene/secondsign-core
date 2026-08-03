@@ -96,7 +96,7 @@ class DecisionEngine:
         policy: Policy, intent: TransactionIntent, context: PolicyContext
     ) -> PluginJudgement:
         try:
-            return policy.evaluate(intent, context)
+            result = policy.evaluate(intent, context)
         except Exception:  # noqa: BLE001 — any failure is uncertainty, and uncertainty denies
             # The failure is turned into a denial and combined in, never
             # swallowed: a policy that could not answer must not be an ALLOW.
@@ -104,3 +104,14 @@ class DecisionEngine:
                 verdict=PluginVerdict.DENY,
                 findings=(Finding(code=ReasonCode.plugin_error),),
             )
+        # A policy that returns something other than a PluginJudgement — None, a
+        # bare verdict, anything — would crash `combine` outside this catch and
+        # unwind `decide` with no Decision and so no receipt (INV-11). The engine
+        # is fail-closed on that too, not only on a raised exception: an
+        # unrecognisable answer is uncertainty, and uncertainty denies.
+        if not isinstance(result, PluginJudgement):
+            return PluginJudgement(
+                verdict=PluginVerdict.DENY,
+                findings=(Finding(code=ReasonCode.plugin_invalid_result),),
+            )
+        return result

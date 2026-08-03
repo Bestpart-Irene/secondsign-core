@@ -237,3 +237,52 @@ class TestTheClientRefusesUnsafeConfiguration:
     def test_partial_tls_is_not_constructible(self, pki) -> None:
         with pytest.raises(ValueError, match="client_cert"):
             GatewayClient("203.0.113.9", 8787, ca_file=str(pki["ca_cert"]))
+
+
+class TestARefusalCarriesNoRemoteBytes:
+    """I4: `TransportRefusal` has no free-text field. A hostile listener's
+    response line or an exception message must not reach a model the managed
+    agent reads — the reason enum is the whole vocabulary an agent branches on."""
+
+    def test_the_refusal_model_has_no_detail_field(self) -> None:
+        assert "detail" not in TransportRefusal.model_fields, (
+            "a free-text field on the agent-facing refusal is an injection channel"
+        )
+
+    def test_a_hostile_response_line_does_not_reach_the_refusal(self, unused_loopback_port) -> None:
+        """A raw TCP listener that answers with a non-HTTP status line makes
+        http.client raise BadStatusLine, whose message is the peer's bytes. The
+        refusal that results carries none of them — only its reason and status."""
+        import socket
+        import threading
+
+        host, port = "127.0.0.1", unused_loopback_port
+        injection = b"HTTP-ish <script>alert(1)</script> not a status line\r\n\r\n"
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind((host, port))
+        listener.listen(1)
+
+        def serve() -> None:
+            try:
+                conn, _ = listener.accept()
+                conn.recv(4096)
+                conn.sendall(injection)
+                conn.close()
+            except OSError:
+                pass
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        try:
+            client = GatewayClient(host=host, port=port)
+            outcome = client.request_authorization(make_wire_request())
+        finally:
+            listener.close()
+            thread.join(timeout=5)
+
+        assert isinstance(outcome, TransportRefusal)
+        rendered = outcome.model_dump_json()
+        assert b"script".decode() not in rendered
+        assert "alert" not in rendered
+        assert outcome.reason is TransportRefusalReason.gateway_unreachable

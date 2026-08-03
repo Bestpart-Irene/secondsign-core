@@ -88,3 +88,23 @@ def test_reason_codes_are_deduplicated_in_order():
         [DenyPolicy(ReasonCode.velocity_limit), DenyPolicy(ReasonCode.velocity_limit)]
     )
     assert decision.reasons == (ReasonCode.velocity_limit,)
+
+
+class ReturnsNotAJudgement:
+    """A policy that returns something that is not a PluginJudgement — the shape
+    of a bug, not an exception. Without a guard it would crash `combine` outside
+    the engine's try and unwind `decide` with no Decision and so no receipt."""
+
+    def evaluate(self, intent, context):
+        return None
+
+
+def test_a_policy_returning_a_non_judgement_denies_rather_than_crashing():
+    decision = _decide([ReturnsNotAJudgement()])
+    assert decision.verdict is DecisionVerdict.DENY
+    assert ReasonCode.plugin_invalid_result in decision.reasons
+
+
+def test_a_non_judgement_return_does_not_poison_the_other_policies():
+    decision = _decide([AbstainPolicy(), ReturnsNotAJudgement(), AbstainPolicy()])
+    assert decision.verdict is DecisionVerdict.DENY

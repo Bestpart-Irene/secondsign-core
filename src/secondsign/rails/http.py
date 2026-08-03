@@ -27,6 +27,7 @@ or error return carries it.
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -34,6 +35,29 @@ from typing import Final
 
 from secondsign.gateway.execution import ExecutionStatus, RailResult
 from secondsign.intent import TransactionIntent
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect handler that never redirects.
+
+    The default opener follows 3xx and re-sends the request — with the
+    ``Authorization`` header intact — to the ``Location`` target, across hosts
+    and across an https→http downgrade. For a component whose whole job is
+    holding a credential, that is credential exfiltration one misconfigured
+    rail away; and a redirect whose target answers 200 would be read as
+    ``success`` for a payment the real rail never processed. Returning ``None``
+    from ``redirect_request`` leaves the 3xx response in place, so
+    :func:`_status_for` reads it as ``unknown`` — the rail's state genuinely is
+    unknowable through a redirect this side refuses to follow.
+    """
+
+    def redirect_request(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
+#: One opener, built once, with redirects refused. The credential travels only
+#: to the configured URL and to nowhere a 3xx would send it.
+_OPENER: Final = urllib.request.build_opener(_NoRedirect())
 
 #: The header the gateway stamps on every request it dispatches. A label for
 #: reconciliation, not a control: anything could set it. What makes it useful is
@@ -81,15 +105,20 @@ class HTTPRailExecutor:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
+            with _OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:
                 return RailResult(status=_status_for(response.status), reference=None)
         except urllib.error.HTTPError as exc:
             # An HTTP error still carries a status, and the status is the whole
             # distinction between a decline and a maybe.
             return RailResult(status=_status_for(exc.code), reference=None)
-        except OSError:
-            # Connection refused, DNS failure, timeout, a reset mid-response.
-            # The request may have been processed before the connection died.
+        except (OSError, http.client.HTTPException):
+            # Connection refused, DNS failure, timeout, a reset mid-response
+            # (OSError); or a non-HTTP answer — a garbage status line, a wrong
+            # service on the port — which raises `http.client.HTTPException`,
+            # *not* an OSError. The request may have been processed either way,
+            # so dispatch must answer rather than let the exception escape into
+            # a money-moving path with no receipt written (INV-11): `unknown` is
+            # the honest state, reconciled through the idempotency key.
             return RailResult(status=ExecutionStatus.unknown, reference=None)
 
     def __repr__(self) -> str:

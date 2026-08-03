@@ -147,6 +147,21 @@ class PolicyPluginConformance:
         for view in conformance_corpus():
             yield view, run_plugins([plugin], view)
 
+    def _raw_judgements(self):
+        """What the plugin itself emits, without the runner's sanitisation.
+
+        `run_plugins` re-validates a plugin's judgement (a model_construct'd or
+        subclassed result is round-tripped through `model_validate`), so a value
+        a plugin smuggled is scrubbed before it is returned. That backstop is
+        correct for the *engine*, but it is not what a conformance kit certifies:
+        the kit certifies the *plugin*, and a plugin that emits an out-of-bounds
+        quantity is non-conformant whether or not the runner would later scrub
+        it. So the emitted-value checks read the plugin's own output directly.
+        """
+        plugin = self._plugin()
+        for view in conformance_corpus():
+            yield view, plugin.evaluate(view)
+
     # -- contract compliance ------------------------------------------------
 
     def test_declares_the_supported_contract_version(self):
@@ -224,9 +239,12 @@ class PolicyPluginConformance:
         What remains checkable is the quantity bound. Pydantic validation can
         be bypassed with ``model_construct``, so the emitted values are
         verified here rather than trusted: a quantity large enough to hold an
-        account number is a leak whatever route produced it.
+        account number is a leak whatever route produced it. The plugin's *raw*
+        output is read (`_raw_judgements`), not the runner-sanitised one — the
+        kit certifies what the plugin emits, and the runner's re-validation
+        would otherwise scrub a smuggled value before this check could see it.
         """
-        for _, result in self._judgements():
+        for _, result in self._raw_judgements():
             for finding in result.findings:
                 assert isinstance(finding.code, ReasonCode), (
                     f"finding carries {finding.code!r}, which is not a published reason code"
