@@ -191,15 +191,21 @@ _PAYMENT_ACTIONS: Final[frozenset[ActionClass]] = frozenset(
     {ActionClass.payment, ActionClass.refund, ActionClass.payout, ActionClass.transfer}
 )
 
-#: Strictness order for reversibility, strictest first — the enum's own
-#: declaration order. Used only to check the direction a claim may move.
+#: Strictness order for reversibility, strictest first. Used only to check the
+#: direction a claim may move.
 _REVERSIBILITY_ORDER: Final[tuple[Reversibility, ...]] = tuple(Reversibility)
 
-#: What the gateway assumes when the wire says nothing. The strictest member of
-#: the enum, taken from its declaration order rather than written out, so a
-#: future member added below it is picked up here instead of being missed.
-_STRICTEST_REVERSIBILITY: Final[Reversibility] = _REVERSIBILITY_ORDER[0]
-_STRICTEST_TRUST: Final[SourceTrust] = tuple(SourceTrust)[0]
+#: What the gateway assumes when the wire says nothing — the strictest member of
+#: each enum, named explicitly, NOT taken as `tuple(Enum)[0]`. Deriving the
+#: strictest default from declaration order made a reorder of the enum a silent
+#: fail-open: put `trusted_instruction` first and `_STRICTEST_TRUST` would flip
+#: to the *loosest* member, stamping every wire proposal as fully trusted, while
+#: the contract-surface ratchet — which compared members order-insensitively —
+#: caught nothing. Naming the members means the gateway's strictest default
+#: cannot move when the enum is reordered; the ratchet now also pins member
+#: order, so the reorder itself is a caught change rather than a quiet flip.
+_STRICTEST_REVERSIBILITY: Final[Reversibility] = Reversibility.irreversible
+_STRICTEST_TRUST: Final[SourceTrust] = SourceTrust.untrusted_data
 
 
 class UnmappableAction(Exception):
