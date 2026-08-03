@@ -53,6 +53,12 @@ class StripePaymentExecutor:
         # `client` defaults to the real stripe module (resolved lazily in
         # dispatch); tests inject a fake. `payment_method` is a Stripe test
         # PaymentMethod token by default, overridden in production.
+        #
+        # A missing optional SDK surfaces as an `ImportError` here in dispatch,
+        # not an escaping crash: `ExecutionGateway.execute` catches any executor
+        # exception and answers `unknown`, so a StripePaymentExecutor built
+        # without the `stripe` extra fails closed rather than taking down a
+        # money-moving path with no receipt (INV-11).
         self._api_key = api_key
         self._client = client
         self._payment_method = payment_method

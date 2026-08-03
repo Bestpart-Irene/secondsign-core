@@ -177,9 +177,26 @@ class ExecutionGateway:
                 status=ExecutionStatus.unknown, digest=decision.digest, reference=None
             )
 
-        result = self._executor.dispatch(intent)
-        outcome = ExecutionOutcome(
-            status=result.status, digest=decision.digest, reference=result.reference
-        )
+        # The executor is trusted but not infallible, and the reservation is
+        # already made: if `dispatch` raises — or *returns* something that is not
+        # a RailResult, which the structural `RailExecutor` Protocol cannot stop
+        # — the money may have moved and the key is spent. Both the call and the
+        # reading of its result are inside the guard, because the failure the
+        # comment names ("a third-party executor that breaks the returns-a-
+        # RailResult contract") shows up as a `None.status` or an
+        # `ExecutionOutcome` validation error on the *return*, not only as a
+        # raise. Letting either escape would leave no receipt on a money-moving
+        # path (INV-11) and the key stuck reserved-but-unfinalized, which a retry
+        # then reads as `unknown` forever. `unknown` is the honest floor:
+        # finalized, reconciled through the idempotency key, never re-dispatched.
+        try:
+            result = self._executor.dispatch(intent)
+            outcome = ExecutionOutcome(
+                status=result.status, digest=decision.digest, reference=result.reference
+            )
+        except Exception:  # noqa: BLE001 — a raise or a garbage return is uncertainty, and uncertainty is unknown
+            outcome = ExecutionOutcome(
+                status=ExecutionStatus.unknown, digest=decision.digest, reference=None
+            )
         self._store.finalize(key, outcome)
         return outcome
