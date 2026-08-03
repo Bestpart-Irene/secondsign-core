@@ -426,7 +426,14 @@ reversal.
 
 ## Red-team matrix
 
-Every threat gets at least one case that must fail. **The identifiers are
+Every threat gets at least one case that must fail. **These cases are specified,
+not yet executed:** none of `C-RT-001`..`C-RT-026` is backed by a running test
+today. The only Solidity that executes is the toolchain smoke test
+(`PinnedReleases.t.sol`), which proves the harness is real — not that any case
+below holds. The expected verdicts are the specification the later on-chain
+slices are built against, a commitment rather than a result.
+
+**The identifiers are
 stable, not row numbers**: cases are added but never renumbered, a deleted case
 leaves its number retired, and a revised case keeps its number. On-chain reason
 codes are derived from these identifiers, so unstable numbering would mean
@@ -463,10 +470,14 @@ by count.
 | `C-RT-026` | Calldata rewritten after approval | Commitment comparison fails before signing, signature refused |
 
 **Known coverage gaps, stated rather than papered over.** C11 has no case in this
-matrix: bypassing the signing boundary is verified on chain, by the topology
-assertions in `ONCHAIN-S001`, not by a decision-layer case. A case for a change
-in guard configuration identity between decision and execution is owed, and lands
-with the slice that puts that identity into the commitment.
+matrix: bypassing the signing boundary is *to be* verified on chain by the
+topology assertions in `ONCHAIN-S001` — a slice that is designed but **not yet
+built**, so C11 is unverified today, not verified. A case for a change in guard
+configuration identity between decision and execution is owed, and lands with the
+slice that puts that identity into the commitment. The gap is wider than these
+two: as the matrix heading says, none of its cases execute yet, so every expected
+verdict above is a commitment this design must still be held to, not a result it
+has already produced.
 
 ## Technical assumptions and residual risks
 

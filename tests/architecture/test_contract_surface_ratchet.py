@@ -281,8 +281,10 @@ def _published_callables() -> dict[str, object]:
 
     Only ``inspect.isfunction`` symbols are returned: classes (enums, models, the
     ``PolicyPlugin`` protocol) and the ``Fingerprint`` alias are locked by the
-    name, enum and field baselines, and a pydantic model's generated ``__init__``
-    is already pinned field-by-field. Discovery — rather than a hand-list — is
+    name, enum and field baselines — and, for ``PolicyPlugin``, by
+    ``test_policy_plugin_protocol_surface_is_frozen``, which pins its method
+    signature. A pydantic model's generated ``__init__`` is already pinned
+    field-by-field. Discovery — rather than a hand-list — is
     what makes a newly published function fail the set check below until it is
     deliberately baselined.
     """
@@ -365,6 +367,45 @@ def test_finding_quantity_bounds_are_frozen():
         le = getattr(constraints.get("le"), "le", None)
         assert ge == 0, f"Finding.{name} lower bound moved off 0"
         assert le == contracts.MAX_DETAIL_MAGNITUDE, f"Finding.{name} ceiling moved off the cap"
+
+
+def test_policy_view_numeric_bounds_are_frozen():
+    """PolicyView's minor-unit and count fields are non-negative — that is surface.
+
+    The field baseline records only ``(required, type token)``, so loosening
+    ``value_lower_minor: int = Field(ge=0)`` to ``Field(ge=-1_000_000_000)`` —
+    re-opening negative money on the plugin boundary — passes it unseen. The lower
+    bounds are locked here so reopening one is a surface change a version bump has
+    to acknowledge, not a quiet edit.
+    """
+    fields = contracts.PolicyView.model_fields
+    for name in ("value_lower_minor", "value_upper_minor", "scope_count", "recent_count_window"):
+        constraints = {type(item).__name__.lower(): item for item in fields[name].metadata}
+        ge = getattr(constraints.get("ge"), "ge", None)
+        assert ge == 0, f"PolicyView.{name} lower bound moved off 0"
+
+
+def test_policy_plugin_protocol_surface_is_frozen():
+    """INV-15. The ``PolicyPlugin`` Protocol is the third-party contract, so its
+    method surface is a compatibility promise — not only its name.
+
+    The published-name set locks that ``PolicyPlugin`` exists; it does not lock its
+    shape. Renaming ``evaluate`` to ``assess``, or changing its
+    ``(view) -> PluginJudgement`` signature, breaks every extension while passing
+    the name check. The runner's docstring says this surface is locked; pinning it
+    here is what makes that claim true.
+    """
+    plugin = contracts.PolicyPlugin
+    assert _type_token(plugin.__annotations__["contract_version"]) == "int", (
+        "PolicyPlugin.contract_version attribute type changed"
+    )
+    assert _signature_token(plugin.evaluate) == {
+        "params": (
+            ("self", "POSITIONAL_OR_KEYWORD", "<unannotated>", NO_DEFAULT),
+            ("view", "POSITIONAL_OR_KEYWORD", "PolicyView", NO_DEFAULT),
+        ),
+        "returns": "PluginJudgement",
+    }, "PolicyPlugin.evaluate signature changed"
 
 
 def test_published_callables_are_exactly_the_frozen_set():
