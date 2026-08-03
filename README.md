@@ -59,6 +59,28 @@ pip install secondsign-core            # the engine (Python 3.11+)
 pip install "secondsign-core[stripe]"  # plus the Stripe rail driver
 ```
 
+### Run the quickstart (no Docker)
+
+The whole decision path in one script — three proposals through the *real*
+gateway `authorize()` / `resolve()`, on a mock rail that moves no money:
+
+```bash
+pip install secondsign-core
+python examples/quickstart.py     # one script, imports only the public API
+```
+
+```text
+  agent proposes  $42    →   completed        ✓  money moved (mock)
+  agent proposes  $300   →   awaiting_review  ⏸  parked for a human
+    approver clicks Approve →   executed         ✓  money moved (mock)
+  agent proposes  $900   →   refused          ✗  value_band_exceeded
+```
+
+[`examples/quickstart.py`](examples/quickstart.py) is self-contained on the
+public API — clone the repo to run it, or copy it anywhere. For the
+production-faithful topology — two networks, mTLS, the agent in its own
+container with no rail code — run the demo below.
+
 ### Run the demo (Docker required)
 
 ```bash
@@ -219,8 +241,11 @@ print(decision.verdict.name, [reason.value for reason in decision.reasons])
 # DENY ['value_band_exceeded']
 ```
 
-The full path — held, approved by a second human, released through Stripe, and
-receipted — is in [`tests/e2e/test_vertical_path.py`](tests/e2e/test_vertical_path.py).
+That is the decision primitive in isolation. The full path — proposed, held,
+approved by a second human, executed, and receipted — runs in
+[`examples/quickstart.py`](examples/quickstart.py) (no Docker), and is proven
+against real test-mode Stripe in
+[`tests/e2e/test_vertical_path.py`](tests/e2e/test_vertical_path.py).
 
 ## What it guarantees
 
