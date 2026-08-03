@@ -61,7 +61,10 @@ class TransportRefusal(BaseModel):
 
     status: Literal[AgentOutcomeStatus.refused] = AgentOutcomeStatus.refused
     reason: TransportRefusalReason
-    detail: str = ""
+    # No `detail`. The reason is the closed vocabulary an agent branches on;
+    # a free-text field on a model the agent reads is a channel for whatever
+    # an exception message or a hostile peer's response line happens to carry
+    # (I4), and nothing downstream needs it.
 
 
 def _is_literal_loopback(host: str) -> bool:
@@ -130,27 +133,24 @@ class GatewayClient:
             response = connection.getresponse()
             payload = response.read()
             status_code = response.status
-        except ssl.SSLError as exc:
-            return TransportRefusal(reason=TransportRefusalReason.tls_rejected, detail=str(exc))
-        except (OSError, http.client.HTTPException) as exc:
-            return TransportRefusal(
-                reason=TransportRefusalReason.gateway_unreachable, detail=str(exc)
-            )
+        except ssl.SSLError:
+            return TransportRefusal(reason=TransportRefusalReason.tls_rejected)
+        except (OSError, http.client.HTTPException):
+            # `http.client.HTTPException` — a `BadStatusLine` from the wrong
+            # listener — carries the peer's raw response line in its message.
+            # The reason enum is the whole vocabulary; the exception text is not
+            # relayed, because a model the managed agent reads must never carry
+            # bytes an attacker on the other end of the socket chose (the same
+            # discipline the malformed-response branch already applied to the
+            # body).
+            return TransportRefusal(reason=TransportRefusalReason.gateway_unreachable)
         finally:
             connection.close()
 
         if status_code != 200:
-            return TransportRefusal(
-                reason=TransportRefusalReason.gateway_declined,
-                detail=f"HTTP {status_code}",
-            )
+            return TransportRefusal(reason=TransportRefusalReason.gateway_declined)
         try:
             parsed = WireResponse.model_validate_json(payload)
         except ValidationError:
-            # The detail deliberately excludes the body: an unparseable answer
-            # from the wrong listener is not something to echo into agent logs.
-            return TransportRefusal(
-                reason=TransportRefusalReason.malformed_response,
-                detail="the response did not parse as this wire version",
-            )
+            return TransportRefusal(reason=TransportRefusalReason.malformed_response)
         return parsed.outcome
