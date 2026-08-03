@@ -119,20 +119,51 @@ class TestTheChannelLoadsWholeOrNotAtAll:
         assert refusal.reason is StartupRefusalReason.malformed_principal_entry
 
 
+def _ca_pem(common_name: str) -> bytes:
+    """A real self-signed CA certificate in PEM, for the trust-anchor tests.
+
+    The separation check parses these as certificates now (it compares DER, not
+    file bytes), so a fake byte string will not do. `cryptography` is a dev/test
+    dependency — never a runtime one — so this lives in the test, not in src.
+    """
+    import datetime as dt
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    now = dt.datetime.now(dt.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(minutes=1))
+        .not_valid_after(now + dt.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    return cert.public_bytes(serialization.Encoding.PEM)
+
+
 class TestChannelSeparation:
-    def _config(self, tmp_path: Path, ca_bytes: bytes = b"approver ca\n") -> ApproverConfig:
+    def _config_with_ca(self, tmp_path: Path, ca_pem: bytes) -> ApproverConfig:
         loaded = load_approver_config(
             _full_settings(
                 tmp_path,
-                SECONDSIGN_APPROVER_CA=str(_material(tmp_path, "sep-ca.pem", ca_bytes)),
+                SECONDSIGN_APPROVER_CA=str(_material(tmp_path, "sep-ca.pem", ca_pem)),
             )
         )
         assert isinstance(loaded, ApproverConfig)
         return loaded
 
     def test_distinct_anchors_and_populations_pass(self, tmp_path) -> None:
-        agent_ca = _material(tmp_path, "agent-ca.pem", b"agent ca\n")
-        config = self._config(tmp_path)
+        agent_ca = _material(tmp_path, "agent-ca.pem", _ca_pem("agent CA"))
+        config = self._config_with_ca(tmp_path, _ca_pem("approver CA"))
         assert (
             check_channel_separation(
                 config, agent_client_ca=agent_ca, agent_allowlist=frozenset({AGENT})
@@ -141,20 +172,61 @@ class TestChannelSeparation:
         )
 
     def test_one_certificate_behind_two_paths_is_one_anchor(self, tmp_path) -> None:
-        """Compared by bytes, not by name — the failure this exists to catch is
-        an operator pointing both settings at copies of one CA."""
-        same_bytes = b"one ca, two names\n"
-        agent_ca = _material(tmp_path, "agent-ca.pem", same_bytes)
-        config = self._config(tmp_path, ca_bytes=same_bytes)
+        """The same certificate on both sides, whatever the file bytes."""
+        shared = _ca_pem("shared CA")
+        agent_ca = _material(tmp_path, "agent-ca.pem", shared)
+        config = self._config_with_ca(tmp_path, shared)
         refusal = check_channel_separation(
             config, agent_client_ca=agent_ca, agent_allowlist=frozenset({AGENT})
         )
         assert isinstance(refusal, ConfigurationRefusal)
         assert refusal.reason is StartupRefusalReason.shared_trust_anchor
 
+    def test_the_same_certificate_re_encoded_is_still_one_anchor(self, tmp_path) -> None:
+        """A byte comparison would miss this: the same cert with different line
+        endings and a comment header is byte-different but the same anchor."""
+        cert = _ca_pem("re-encoded CA")
+        agent_ca = _material(tmp_path, "agent-ca.pem", cert)
+        reencoded = b"# a comment an operator added\r\n" + cert.replace(b"\n", b"\r\n")
+        config = self._config_with_ca(tmp_path, reencoded)
+        refusal = check_channel_separation(
+            config, agent_client_ca=agent_ca, agent_allowlist=frozenset({AGENT})
+        )
+        assert isinstance(refusal, ConfigurationRefusal)
+        assert refusal.reason is StartupRefusalReason.shared_trust_anchor
+
+    def test_a_bundle_containing_the_agent_ca_is_refused(self, tmp_path) -> None:
+        """The B6 bypass byte comparison misses. `load_verify_locations` trusts
+        every certificate in a file, so an approver CA file that is a bundle
+        [approver-CA + agent-CA] makes the agent CA a valid approver issuer —
+        byte-inequal, but sharing a trust anchor."""
+        agent_pem = _ca_pem("agent CA")
+        approver_pem = _ca_pem("approver CA")
+        agent_ca = _material(tmp_path, "agent-ca.pem", agent_pem)
+        bundle = self._config_with_ca(tmp_path, approver_pem + b"\n" + agent_pem)
+        refusal = check_channel_separation(
+            bundle, agent_client_ca=agent_ca, agent_allowlist=frozenset({AGENT})
+        )
+        assert isinstance(refusal, ConfigurationRefusal)
+        assert refusal.reason is StartupRefusalReason.shared_trust_anchor
+
+    def test_a_truncated_certificate_block_shares_no_anchor(self, tmp_path) -> None:
+        """A PEM with a BEGIN and no END parses to no certificate, so it shares
+        no trust anchor — it cannot masquerade as one. (A file that is not a
+        loadable CA is refused later, when the listener's context is built.)"""
+        agent_ca = _material(tmp_path, "agent-ca.pem", _ca_pem("agent CA"))
+        truncated = b"-----BEGIN CERTIFICATE-----\nabc123 no end marker\n"
+        config = self._config_with_ca(tmp_path, truncated)
+        assert (
+            check_channel_separation(
+                config, agent_client_ca=agent_ca, agent_allowlist=frozenset({AGENT})
+            )
+            is None
+        )
+
     def test_a_principal_on_both_allowlists_is_refused(self, tmp_path) -> None:
-        agent_ca = _material(tmp_path, "agent-ca.pem", b"agent ca\n")
-        config = self._config(tmp_path)
+        agent_ca = _material(tmp_path, "agent-ca.pem", _ca_pem("agent CA"))
+        config = self._config_with_ca(tmp_path, _ca_pem("approver CA"))
         refusal = check_channel_separation(
             config, agent_client_ca=agent_ca, agent_allowlist=frozenset({CHECKER, AGENT})
         )
@@ -164,7 +236,7 @@ class TestChannelSeparation:
     def test_a_plaintext_agent_channel_still_checks_the_population(self, tmp_path) -> None:
         """On loopback the agent channel has no CA; the disjointness rule does
         not go with it."""
-        config = self._config(tmp_path)
+        config = self._config_with_ca(tmp_path, _ca_pem("approver CA"))
         refusal = check_channel_separation(
             config, agent_client_ca=None, agent_allowlist=frozenset({CHECKER})
         )
@@ -172,7 +244,7 @@ class TestChannelSeparation:
         assert refusal.reason is StartupRefusalReason.principal_on_both_channels
 
     def test_an_unreadable_anchor_cannot_pass_the_comparison(self, tmp_path) -> None:
-        config = self._config(tmp_path)
+        config = self._config_with_ca(tmp_path, _ca_pem("approver CA"))
         refusal = check_channel_separation(
             config,
             agent_client_ca=tmp_path / "vanished.pem",
