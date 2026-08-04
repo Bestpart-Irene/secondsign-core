@@ -277,26 +277,39 @@ jobs:
         working-directory: onchain
         run: |
           set -euo pipefail
-          scratch="$(mktemp -d)"
-          cp -R foundry.toml test node_modules "${scratch}/"
-          python3 - "${scratch}" <<'PY'
+          # A gate that cannot fail is not a gate. For each mutation below — one
+          # assertion in each test — flip it to a false expectation on a fresh copy
+          # and require a non-zero forge exit. This covers the test1 version
+          # assertion and a test2 topology-distinguishing assertion, so neither can
+          # be deleted or tautologised with the suite staying green.
+          python3 <<'PY'
           import pathlib
+          import shutil
+          import subprocess
           import sys
+          import tempfile
 
-          root = pathlib.Path(sys.argv[1])
-          target = root / "test" / "topology" / "PinnedReleases.t.sol"
-          source = target.read_text(encoding="utf-8")
-          mutated = source.replace('"1.4.1", "1.4.1 singleton', '"9.9.9", "1.4.1 singleton')
-          if mutated == source:
-              sys.exit("FAIL: the mutation did not apply; this check would prove nothing")
-          target.write_text(mutated, encoding="utf-8")
+          REL = "test/topology/PinnedReleases.t.sol"
+          MUTATIONS = [
+              ('"1.4.1", "1.4.1 singleton', '"9.9.9", "1.4.1 singleton', "test1 version assertion"),
+              ('!accepted150, "1.5.0 must reject', 'accepted150, "1.5.0 must reject', "test2 topology assertion"),
+          ]
+          for find, replace, label in MUTATIONS:
+              scratch = pathlib.Path(tempfile.mkdtemp())
+              for item in ("foundry.toml", "test", "node_modules"):
+                  src = pathlib.Path(item)
+                  dst = scratch / item
+                  shutil.copytree(src, dst) if src.is_dir() else shutil.copy2(src, dst)
+              target = scratch / REL
+              source = target.read_text(encoding="utf-8")
+              mutated = source.replace(find, replace)
+              if mutated == source:
+                  sys.exit(f"FAIL: mutation '{label}' did not apply; this check would prove nothing")
+              target.write_text(mutated, encoding="utf-8")
+              if subprocess.run(["forge", "test"], cwd=scratch, capture_output=True).returncode == 0:
+                  sys.exit(f"FAIL: '{label}' — a mutated assertion still passed; the gate is not executing")
+              print(f"ok: the gate fails for {label}")
           PY
-          cd "${scratch}"
-          if forge test >/dev/null 2>&1; then
-            echo "FAIL: a mutated assertion still passed; the gate is not executing"
-            exit 1
-          fi
-          echo "ok: the gate fails when an assertion is false"
 
   independence:
     name: Dependency boundary and DCO
