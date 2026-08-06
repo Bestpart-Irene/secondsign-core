@@ -816,6 +816,13 @@ slices:
     scope:
       - src/secondsign/onchain/**
       - tests/onchain/**
+      # A new top-level package must be classified in the single isolation
+      # judgement (INV-12) and held control-plane-free by the shared-side import
+      # contract — neither of which lives under `onchain/`. The original manifest
+      # omitted them; a new package cannot exist unclassified.
+      - src/secondsign/isolation.py
+      - pyproject.toml
+      - docs/slices/roadmap.yaml
     forbidden:
       - importing any on-chain type into secondsign.contracts or any v1 module
       - raising CONTRACT_VERSION, or reusing the v1 version constant for the on-chain surface
