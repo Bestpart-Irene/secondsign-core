@@ -156,6 +156,12 @@ _SHARED_PREFIXES: Final[tuple[str, ...]] = (
     "secondsign.contracts",
     "secondsign.intent",
     "secondsign.isolation",
+    # The experimental, unfrozen on-chain vocabulary (ONCHAIN-S002). Frozen
+    # boundary models carrying no control-plane asset, like `contracts` — so it
+    # is shared, and its import closure is held free of the control plane by the
+    # shared-side contract in `pyproject.toml`. That no v1 module reaches it yet
+    # is a separate, stronger fact asserted in `tests/onchain/`.
+    "secondsign.onchain",
 )
 
 

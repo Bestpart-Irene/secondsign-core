@@ -223,6 +223,7 @@ source_modules = [
     "secondsign.contracts",
     "secondsign.intent",
     "secondsign.isolation",
+    "secondsign.onchain",
 ]
 forbidden_modules = [
     "secondsign.approval",
