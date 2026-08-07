@@ -893,3 +893,116 @@ slices:
       ratchet still passes. The private kernel is what keeps the generalisation
       off the public surface — a public generic would change the typing surface
       of a frozen API without changing its behaviour.
+
+  # The OnchainEffect adapter (a Safe transaction decoded to a classified effect)
+  # landed ahead of this queue as chore #104, before the on-chain product code was
+  # sliced. The slices below bring the rest of the co-signer + double-guard
+  # architecture into the queue; the adapter is a landed prerequisite they consume.
+
+  - id: ONCHAIN-S004
+    title: The co-signer path — SecondSign signs a Safe transaction only when the engine allows
+    depends_on: [ONCHAIN-S002, CORE-S011]
+    threats: [C2]
+    scope:
+      - src/secondsign/onchain/**
+      - src/secondsign/gateway/**
+      - src/secondsign/isolation.py
+      - tests/onchain/**
+      - tests/gateway/**
+      - pyproject.toml
+    forbidden:
+      - a signing key reachable from the managed-agent surface or from the shared on-chain package
+      - value moving on any path other than a Safe transaction the engine has co-signed
+      - a co-signature that binds anything other than the exact transaction hash
+      - making cryptography or an Ethereum signing library a non-optional runtime dependency of core
+      - re-deciding on-chain rather than reusing the existing decision engine and maker-checker
+    acceptance:
+      - a proposed Safe transaction is mapped to an intent via the landed OnchainEffect adapter and judged by the existing decision engine, with no second policy engine
+      - an ALLOW yields a signature over that transaction's hash; a DENY yields no signature; a REVIEW holds for maker-checker and signs only after a checker approves
+      - the co-signature binds the exact Safe transaction hash, so a different transaction cannot reuse it
+      - the signing key is control-plane custody, unreachable from the agent surface and from the shared on-chain package, asserted by the isolation suite
+      - the Ethereum signing library is an optional dependency (secondsign[onchain]); core imports and runs without it, and cryptography stays out of the default runtime
+    required_tests: [unit, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+    stop_for_human: true
+    checkpoint_reason: >
+      The co-signature is the whole boundary — turn it off and the agent cannot
+      move value. A human confirms that a DENY withholds the signature and that
+      the signing key is unreachable from the agent surface, before value depends
+      on it.
+    rationale: >
+      The co-signature is the on-chain enforcement point of the off-chain
+      decision — the same digest-binding as the fiat proposal (ADR 0005 / INV-9),
+      a Safe 2-of-2 in place of a credential-holding executor. It reuses the
+      decision engine and maker-checker rather than deciding on-chain. C2 is the
+      threat it answers: the control point is the signature, not the transaction.
+      The signing key is control-plane custody and may not sit in the shared
+      on-chain package; the Ethereum signing library is optional, keeping core's
+      no-crypto-at-runtime discipline. The OnchainEffect adapter it consumes
+      landed as chore #104 ahead of this queue.
+
+  - id: ONCHAIN-S005
+    title: The constitutional double guard — four invariants held on both execution paths
+    depends_on: [ONCHAIN-S001]
+    threats: [C3]
+    scope:
+      - onchain/src/**
+      - onchain/test/**
+      - onchain/foundry.toml
+      - docs/**
+    forbidden:
+      - policy in the guard — an amount, a counterparty or a velocity rule; the guard enforces integrity, the off-chain engine decides
+      - a guard that leaves the module path unguarded, or is installed on only one of the two hooks
+      - copying expression from Safe's contracts or tests into the guard
+      - an invariant asserted by reading the source rather than by an executed transaction that is refused
+    acceptance:
+      - the guard refuses any transaction that would remove SecondSign as a required signer, change the threshold from two, remove or replace either guard, or enable a module that can move value or delegatecall — each proven by a refused execution
+      - the guard is installed on both the transaction and module hooks, and a value move down the module path is refused just as one down the normal path is
+      - a recovery module that only changes owners is not refused — the rule is capability-based, not a blanket ban
+      - the four invariants hold with the off-chain engine offline: the account cannot move value, which is the fail-closed state, not an error
+      - the guard contains no amount, counterparty or velocity policy — those are the off-chain engine's, asserted by the guard's own surface
+    required_tests: [onchain_topology]
+    gates: [ruff_check, ruff_format, forge_fmt, forge_test, validate_slices]
+    stop_for_human: true
+    checkpoint_reason: >
+      The first production guard under onchain/src, and the integrity floor the
+      whole co-signer scheme stands on. A human confirms each invariant is proven
+      by a refused execution — not described — and that the module path is
+      covered, before the account relies on it.
+    rationale: >
+      The guard is integrity only: it keeps the 2-of-2 co-signer arrangement
+      un-subvertable and closes the module-path bypass (C3, account-control
+      change), while the off-chain engine decides value. It depends on
+      ONCHAIN-S001 because a production guard must not ship until the double-guard
+      topology it relies on has been falsified or confirmed. This is the slice
+      that opens onchain/src — the prohibition there is lifted here by design.
+
+  - id: ONCHAIN-S006
+    title: Effect by simulation — the decided effect read from execution, not from calldata
+    depends_on: [ONCHAIN-S004]
+    threats: [C5, C6]
+    scope:
+      - src/secondsign/onchain/**
+      - src/secondsign/gateway/**
+      - tests/onchain/**
+      - pyproject.toml
+    forbidden:
+      - a simulation result trusted without a validity envelope that a later state change invalidates
+      - a downgrade to ALLOW on a static decode where a simulation is available
+      - a mainnet fork or an RPC secret on the default decision path
+      - changing the OnchainEffect type so the static-decode adapter can no longer satisfy it
+    acceptance:
+      - the effect a policy judges is read from a simulated execution's actual balance and allowance deltas, replacing the static-decode body while keeping the OnchainEffect surface
+      - a simulation carries a validity envelope; a state change outside it forces a new decision rather than reusing the result
+      - an effect the simulation cannot resolve denies rather than approximating
+      - the static-decode adapter remains a working fallback and its tests still pass, so the two share one effect type
+    required_tests: [unit, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+    stop_for_human: false
+    rationale: >
+      Simulation is the committed effect model (the on-chain architecture design):
+      it reads what a transaction actually does — fee-on-transfer, proxies,
+      anything a static decode cannot see — as real deltas. It answers C5
+      (undecidable semantics deny; a closed effect model) and C6 (a simulation
+      validity envelope). It replaces the static-decode body landed in the adapter
+      while keeping OnchainEffect, the type the policies judge, stable.

@@ -21,11 +21,14 @@ slice that stops for a human before it is marked done.
 | `ONCHAIN-S001` ⚑ | Falsify or confirm the double-guard topology on a local chain | — |
 | `ONCHAIN-S002` | Candidate on-chain verdict types behind an unfrozen version constant | — |
 
-## Blocked (1)
+## Blocked (4)
 
 | Slice | Title | Waiting on |
 |---|---|---|
 | `ONCHAIN-S003` ⚑ | Generalise the strictness algebra in a private kernel without moving the public surface | ONCHAIN-S002 |
+| `ONCHAIN-S004` ⚑ | The co-signer path — SecondSign signs a Safe transaction only when the engine allows | ONCHAIN-S002 |
+| `ONCHAIN-S005` ⚑ | The constitutional double guard — four invariants held on both execution paths | ONCHAIN-S001 |
+| `ONCHAIN-S006` | Effect by simulation — the decided effect read from execution, not from calldata | ONCHAIN-S004 |
 
 ## Complete (23)
 
