@@ -8,6 +8,13 @@ is not re-exported from the top-level ``secondsign`` package. See
 :mod:`secondsign.onchain.types` for the surface and why it is kept separate.
 """
 
+from secondsign.onchain.effect import (
+    EffectKind,
+    OnchainEffect,
+    SafeAdapter,
+    SafeCall,
+    SafeOperation,
+)
 from secondsign.onchain.types import (
     ONCHAIN_CONTRACT_VERSION,
     RED_TEAM_COVERAGE,
@@ -20,8 +27,13 @@ from secondsign.onchain.types import (
 __all__ = [
     "ONCHAIN_CONTRACT_VERSION",
     "RED_TEAM_COVERAGE",
+    "EffectKind",
+    "OnchainEffect",
     "OnchainFinding",
     "OnchainJudgement",
     "OnchainReasonCode",
     "OnchainVerdict",
+    "SafeAdapter",
+    "SafeCall",
+    "SafeOperation",
 ]
