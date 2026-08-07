@@ -42,27 +42,49 @@ def _bounded(value: int) -> int:
     return min(value, _MAX_DETAIL_MAGNITUDE)
 
 
-def _deny(
-    code: OnchainReasonCode, *, observed: int | None = None, limit: int | None = None
+def _judge(
+    verdict: OnchainVerdict,
+    code: OnchainReasonCode,
+    *,
+    observed: int | None = None,
+    limit: int | None = None,
 ) -> OnchainJudgement:
     finding = OnchainFinding(
         code=code,
         observed=None if observed is None else _bounded(observed),
         limit=None if limit is None else _bounded(limit),
     )
-    return OnchainJudgement(verdict=OnchainVerdict.DENY, findings=(finding,))
+    return OnchainJudgement(verdict=verdict, findings=(finding,))
 
 
-def evaluate(effect: OnchainEffect, *, approval_cap: int) -> OnchainJudgement:
+def evaluate(
+    effect: OnchainEffect, *, approval_cap: int, review_above: int | None = None
+) -> OnchainJudgement:
     """Judge a decoded effect against a per-transaction token cap.
 
     ABSTAIN means no concern — the on-chain "allow", since permission is the
-    absence of a concern, not something a policy grants. Everything unmapped or
-    over the cap denies (fail-closed).
+    absence of a concern, not something a policy grants. Above ``review_above``
+    (and up to the cap) an amount is held for a human (REVIEW); above the cap, or
+    unmapped, it is denied (fail-closed). ``review_above`` is optional and, if
+    given, must be below ``approval_cap`` for the band to be reachable.
     """
     if effect.kind is EffectKind.erc20_approval or effect.kind is EffectKind.erc20_transfer:
         amount = effect.amount if effect.amount is not None else 0
         if amount > approval_cap:
-            return _deny(OnchainReasonCode.unbounded_approval, observed=amount, limit=approval_cap)
+            return _judge(
+                OnchainVerdict.DENY,
+                OnchainReasonCode.unbounded_approval,
+                observed=amount,
+                limit=approval_cap,
+            )
+        if review_above is not None and amount > review_above:
+            # Checked after the cap, so an over-cap amount denies rather than
+            # reviewing — the same ordering the fiat amount policy uses.
+            return _judge(
+                OnchainVerdict.REVIEW,
+                OnchainReasonCode.unbounded_approval,
+                observed=amount,
+                limit=review_above,
+            )
         return _ABSTAIN
-    return _deny(_REFUSALS[effect.kind])
+    return _judge(OnchainVerdict.DENY, _REFUSALS[effect.kind])

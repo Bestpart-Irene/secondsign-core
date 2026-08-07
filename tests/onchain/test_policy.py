@@ -59,3 +59,27 @@ def test_an_unrecognised_call_is_denied():
 def test_an_approval_with_no_amount_is_treated_as_zero_and_allowed():
     judgement = policy.evaluate(_effect(EffectKind.erc20_approval, None), approval_cap=_CAP)
     assert judgement.verdict is OnchainVerdict.ABSTAIN
+
+
+def test_an_amount_in_the_review_band_is_held_for_a_human():
+    judgement = policy.evaluate(
+        _effect(EffectKind.erc20_approval, 500), approval_cap=_CAP, review_above=100
+    )
+    assert judgement.verdict is OnchainVerdict.REVIEW
+    (finding,) = judgement.findings
+    assert finding.observed == 500
+    assert finding.limit == 100
+
+
+def test_below_the_review_threshold_raises_no_concern():
+    judgement = policy.evaluate(
+        _effect(EffectKind.erc20_approval, 100), approval_cap=_CAP, review_above=100
+    )
+    assert judgement.verdict is OnchainVerdict.ABSTAIN  # exactly the threshold is not yet a review
+
+
+def test_over_the_cap_denies_even_with_a_review_band():
+    judgement = policy.evaluate(
+        _effect(EffectKind.erc20_approval, _CAP + 1), approval_cap=_CAP, review_above=100
+    )
+    assert judgement.verdict is OnchainVerdict.DENY  # the cap is checked before the review band

@@ -15,22 +15,35 @@ Ethereum signing is an optional dependency (``secondsign[onchain]``), imported
 lazily so importing this package pulls in no crypto and the deterministic core
 still runs without it.
 
-First cut: an ALLOW (ABSTAIN, no concern) signs and anything stronger refuses. The
-REVIEW → maker-checker → sign path (holding for a human, as the fiat gateway does)
-is the remaining acceptance criterion of ONCHAIN-S004 and is not wired here yet;
-until it is, a review-worthy action is refused rather than signed, which is
-fail-closed.
+No concern signs, over the cap refuses, and an amount in the review band is held
+for a human: the review is carried through the *same* maker-checker the fiat
+gateway uses (``resolve`` consumes a checker's answer, one-shot, expiring, bound
+to the transaction hash, no self-approval), and only an approval by a different
+principal yields the signature. The one thing the fiat gateway does that this does
+not is re-decide before consuming, because the first-cut policy is stateless — see
+``resolve``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
+from secondsign.approval import CheckerVerdict, MakerChecker, MakerIdentity, Rejected
+from secondsign.approval.maker_checker import PendingApproval
+from secondsign.contracts import Finding, ReasonCode
+from secondsign.decision import Decision, DecisionVerdict
+from secondsign.intent import IntentDigest, ProposalDigest
 from secondsign.onchain import policy
 from secondsign.onchain.effect import SafeAdapter, SafeCall, SafeOperation
 from secondsign.onchain.types import OnchainJudgement, OnchainVerdict
+
+#: How long an on-chain review stays answerable — long enough for a human in
+#: another timezone, short enough that an unanswered approval dies. Mirrors the
+#: fiat gateway's ``REVIEW_TTL``.
+REVIEW_TTL: timedelta = timedelta(hours=4)
 
 _DOMAIN_TYPEHASH_TEXT = "EIP712Domain(uint256 chainId,address verifyingContract)"
 _SAFE_TX_TYPEHASH_TEXT = (
@@ -112,11 +125,14 @@ def safe_transaction_hash(call: SafeCall, context: SafeContext, nonce: int) -> b
 
 
 class CosignStatus(StrEnum):
-    """What became of a co-signing request. No fourth state for the agent to read."""
+    """What became of a co-signing request. Three states, no fourth for the agent."""
 
-    #: A concern-free action; SecondSign's signature is attached.
+    #: A concern-free (or approved) action; SecondSign's signature is attached.
     signed = "signed"
-    #: A concern was raised; no signature. The agent cannot reach the threshold.
+    #: Held for a human checker; no signature yet. Answer it with ``resolve``.
+    held = "held"
+    #: A concern was raised, or a held review's answer was not usable; no
+    #: signature. The agent, one of two required signers, cannot reach the threshold.
     refused = "refused"
 
 
@@ -125,36 +141,129 @@ class CosignOutcome:
     """The co-signer's answer for one proposed transaction."""
 
     status: CosignStatus
-    judgement: OnchainJudgement
+    #: The on-chain judgement behind the answer. ``None`` only when ``resolve`` is
+    #: given an approval id the co-signer is not holding.
+    judgement: OnchainJudgement | None = None
     #: The 65-byte co-signature as ``0x``-hex, present only when ``signed``.
     signature: str | None = None
+    #: The handle a checker answers, present only when ``held``.
+    approval_id: str | None = None
+
+
+@dataclass(frozen=True)
+class _HeldReview:
+    tx_hash: bytes
+    approval: PendingApproval
+    judgement: OnchainJudgement
 
 
 class OnchainCosigner:
-    """Holds the SecondSign signing key and co-signs a concern-free transaction."""
+    """Holds the SecondSign signing key and co-signs a concern-free transaction.
 
-    def __init__(self, private_key: bytes, context: SafeContext, *, approval_cap: int) -> None:
+    A REVIEW-band action is held for a human through the *same* maker-checker the
+    fiat gateway uses, and signed only once a *different* principal approves it —
+    no self-approval, one-shot, expiring, bound to the transaction hash.
+    """
+
+    def __init__(
+        self,
+        private_key: bytes,
+        context: SafeContext,
+        *,
+        approval_cap: int,
+        review_above: int | None = None,
+        review_ttl: timedelta = REVIEW_TTL,
+    ) -> None:
         _, _, account_cls = _load()
         self._account = account_cls.from_key(private_key)
         self._context = context
         self._adapter = SafeAdapter(context.safe_address)
         self._approval_cap = approval_cap
+        self._review_above = review_above
+        self._review_ttl = review_ttl
+        self._maker_checker = MakerChecker()
+        self._pending: dict[str, _HeldReview] = {}
 
     @property
     def address(self) -> str:
         """The Safe owner address SecondSign co-signs as."""
         return str(self._account.address)
 
-    def cosign(self, call: SafeCall, nonce: int) -> CosignOutcome:
-        """Decode, judge, and co-sign only if no concern is raised."""
-        effect = self._adapter.decode(call)
-        judgement = policy.evaluate(effect, approval_cap=self._approval_cap)
-        if judgement.verdict is not OnchainVerdict.ABSTAIN:
-            # DENY (and, until maker-checker is wired, a would-be REVIEW) attaches
-            # no signature — the agent, one of two required signers, cannot proceed.
+    def _judge(self, call: SafeCall) -> OnchainJudgement:
+        return policy.evaluate(
+            self._adapter.decode(call),
+            approval_cap=self._approval_cap,
+            review_above=self._review_above,
+        )
+
+    def _sign(self, tx_hash: bytes) -> str:
+        return "0x" + self._account.unsafe_sign_hash(tx_hash).signature.hex()
+
+    def cosign(self, call: SafeCall, nonce: int, *, proposer: str, now: datetime) -> CosignOutcome:
+        """Decode, judge, and either sign, hold for a human, or refuse.
+
+        ``proposer`` is the maker — the principal that proposed the transaction —
+        recorded so a checker who later approves cannot be the same principal.
+        """
+        judgement = self._judge(call)
+        if judgement.verdict is OnchainVerdict.DENY:
             return CosignOutcome(status=CosignStatus.refused, judgement=judgement)
         tx_hash = safe_transaction_hash(call, self._context, nonce)
-        signature = self._account.unsafe_sign_hash(tx_hash).signature
+        if judgement.verdict is OnchainVerdict.REVIEW:
+            return self._hold(tx_hash, proposer, now, judgement)
         return CosignOutcome(
-            status=CosignStatus.signed, judgement=judgement, signature="0x" + signature.hex()
+            status=CosignStatus.signed, judgement=judgement, signature=self._sign(tx_hash)
+        )
+
+    def _hold(
+        self,
+        tx_hash: bytes,
+        proposer: str,
+        now: datetime,
+        judgement: OnchainJudgement,
+    ) -> CosignOutcome:
+        approval_id = tx_hash.hex()
+        # The maker-checker binds an approval to a proposal digest; on-chain that
+        # digest *is* the transaction hash, so a checker approves this exact
+        # transaction and nothing else. A REVIEW `Decision` is what the shared
+        # maker-checker consumes, so the on-chain review is carried through one.
+        proposal = ProposalDigest(value=approval_id)
+        decision = Decision(
+            verdict=DecisionVerdict.REVIEW,
+            digest=IntentDigest(value=approval_id),
+            findings=(Finding(code=ReasonCode.value_band_exceeded),),
+        )
+        approval = self._maker_checker.request(
+            decision,
+            MakerIdentity(subject=proposer),
+            approval_id=approval_id,
+            proposal=proposal,
+            expires_at=now + self._review_ttl,
+        )
+        self._pending[approval_id] = _HeldReview(
+            tx_hash=tx_hash, approval=approval, judgement=judgement
+        )
+        return CosignOutcome(status=CosignStatus.held, judgement=judgement, approval_id=approval_id)
+
+    def resolve(self, approval_id: str, verdict: CheckerVerdict, *, now: datetime) -> CosignOutcome:
+        """A checker's answer to a held review.
+
+        The one-shot answer is consumed — a self-approval, a replay, an expired or
+        digest-mismatched answer is refused by the shared maker-checker — and only
+        an approval by a *different* principal yields the signature.
+
+        A re-decision before consuming is deliberately absent while the policy is
+        stateless: a held action re-judges to the same REVIEW, so it would change
+        nothing. When the policy gains external state that can tighten a held
+        action (a velocity window, as the fiat gateway has), re-decide-before-
+        consume must return here, exactly as ``AuthorizationService.resolve`` does.
+        """
+        held = self._pending.get(approval_id)
+        if held is None:
+            return CosignOutcome(status=CosignStatus.refused)
+        if isinstance(self._maker_checker.consume(held.approval, verdict, now=now), Rejected):
+            return CosignOutcome(status=CosignStatus.refused, judgement=held.judgement)
+        del self._pending[approval_id]
+        return CosignOutcome(
+            status=CosignStatus.signed, judgement=held.judgement, signature=self._sign(held.tx_hash)
         )
