@@ -19,6 +19,12 @@ import {BaseModuleGuard} from "safe-1.5.0/contracts/base/ModuleManager.sol";
 /// and a human must confirm they ran - the 1.4.1 failure *reproduced*, not
 /// described - before anything is built on them.
 ///
+/// Run it: `forge test --match-path 'test/topology/DoubleGuardTopology.t.sol'`.
+/// A plain run prints one `[PASS]` per numbered claim (the test names carry the
+/// claim); add `-vvvv` to surface the per-claim `Assertion(id, what)` events.
+/// Every refusal is pinned to the guard's exact revert reason, so a `[PASS]` is
+/// the guard acting, not an unrelated revert passing a blind `!ok`.
+///
 /// Coverage is deliberately explicit. This file establishes the core of the
 /// argument by execution:
 ///   1. both pinned releases deploy fresh on one chain, no fork, no RPC secret;
@@ -47,7 +53,6 @@ interface Vm {
         pure
         returns (uint8 v, bytes32 r, bytes32 s);
     function load(address target, bytes32 slot) external view returns (bytes32);
-    function expectRevert() external;
 }
 
 /// @dev A transaction guard (1.4.1) that records whether its hook ran. Nothing
@@ -188,8 +193,7 @@ contract DoubleGuardTopologyTest {
     // --- 2. the transaction guard is invoked on the guarded path ------------
 
     function test_transactionGuardIsInvokedOnTheGuardedPath() public {
-        (Safe150 safe, address singleton) = _deploy150();
-        singleton;
+        (Safe150 safe,) = _deploy150();
         Recorder141 recorder = new Recorder141(); // 1.4.1/1.5.0 guard shape is identical
         _exec150(
             safe, address(safe), abi.encodeWithSignature("setGuard(address)", address(recorder))
@@ -203,26 +207,20 @@ contract DoubleGuardTopologyTest {
     // --- 3. THE reproduction: 1.4.1 module clears the guard, no hook --------
 
     function test_1_4_1_anEnabledModuleClearsTheGuardWithNoHook() public {
-        (Safe141 safe, address agent) = _deploy141();
+        (Safe141 safe,) = _deploy141();
         Recorder141 recorder = new Recorder141();
         RogueModule rogue = new RogueModule();
 
         _exec141(
-            safe,
-            agent,
-            address(safe),
-            abi.encodeWithSignature("setGuard(address)", address(recorder))
+            safe, address(safe), abi.encodeWithSignature("setGuard(address)", address(recorder))
         );
         _exec141(
-            safe,
-            agent,
-            address(safe),
-            abi.encodeWithSignature("enableModule(address)", address(rogue))
+            safe, address(safe), abi.encodeWithSignature("enableModule(address)", address(rogue))
         );
 
         // The guard works on the owner-signed path...
         recorder.reset();
-        _exec141(safe, agent, address(0xdead), "");
+        _exec141(safe, address(0xdead), "");
         _assertTrue(recorder.invoked(), "sanity: the guard runs on execTransaction on 1.4.1");
 
         // ...but the module path never consults it, so the module removes it.
@@ -265,18 +263,28 @@ contract DoubleGuardTopologyTest {
             safe, address(safe), abi.encodeWithSignature("enableModule(address)", address(rogue))
         );
 
-        bool ok = _rogueTry150(
+        // The owner-path setup above legitimately ran the transaction guard;
+        // clear it so the next assertion speaks only to the module path.
+        recorder.reset();
+        _assertGuardRefusal(
             rogue,
             address(safe),
             address(safe),
             abi.encodeWithSignature("setGuard(address)", address(0)),
-            Enum150.Operation.Call
+            Enum150.Operation.Call,
+            "SecondSign S001: module-path guard change refused",
+            "1.5.0: the module guard must refuse the module-path setGuard"
         );
-        _assertTrue(!ok, "1.5.0: the module guard must refuse the module-path setGuard");
         _assertEqAddr(
             _installedGuard(address(safe)),
             address(recorder),
             "1.5.0: the guard must still be installed"
+        );
+        // The transaction guard is blind to the module path (it was never
+        // consulted there) - so it is the module guard, not the version bump,
+        // that refused the call above.
+        _assertTrue(
+            !recorder.invoked(), "1.5.0: the transaction guard must stay blind to the module path"
         );
         emit Assertion(
             "S001-4", "1.5.0: the module guard refused the same module-path guard-clearing call"
@@ -308,20 +316,25 @@ contract DoubleGuardTopologyTest {
 
         // Positive control: a benign module-path call the guard allows goes
         // through, so the refusal below is the guard acting, not a broken setup.
-        _assertTrue(
-            _rogueTry150(rogue, address(safe), address(0xbeef), "", Enum150.Operation.Call),
+        _assertModuleCallSucceeds(
+            rogue,
+            address(safe),
+            address(0xbeef),
+            "",
+            Enum150.Operation.Call,
             "sanity: a benign module-path call must go through"
         );
 
         // The attack: remove the module guard itself down the module path.
-        bool ok = _rogueTry150(
+        _assertGuardRefusal(
             rogue,
             address(safe),
             address(safe),
             abi.encodeWithSignature("setModuleGuard(address)", address(0)),
-            Enum150.Operation.Call
+            Enum150.Operation.Call,
+            "SecondSign S001: module-path guard change refused",
+            "1.5.0: the module guard must refuse a module-path setModuleGuard"
         );
-        _assertTrue(!ok, "1.5.0: the module guard must refuse a module-path setModuleGuard");
         _assertEqAddr(
             _installedModuleGuard(address(safe)),
             address(moduleGuard),
@@ -336,8 +349,7 @@ contract DoubleGuardTopologyTest {
     // --- 5. a module-path delegatecall is refused on 1.5.0 ------------------
 
     function test_1_5_0_aModulePathDelegatecallIsRefused() public {
-        (Safe150 safe, address agent) = _deploy150();
-        agent;
+        (Safe150 safe,) = _deploy150();
         ModuleGuard150 moduleGuard = new ModuleGuard150();
         RogueModule rogue = new RogueModule();
         _exec150(
@@ -349,9 +361,26 @@ contract DoubleGuardTopologyTest {
             safe, address(safe), abi.encodeWithSignature("enableModule(address)", address(rogue))
         );
 
-        bool ok =
-            _rogueTry150(rogue, address(safe), address(0xdead), "", Enum150.Operation.DelegateCall);
-        _assertTrue(!ok, "1.5.0: a module-path delegatecall must be refused");
+        // Positive control: the same module path with a plain Call is allowed, so
+        // the refusal below is the delegatecall branch acting, not a dead path.
+        _assertModuleCallSucceeds(
+            rogue,
+            address(safe),
+            address(0xbeef),
+            "",
+            Enum150.Operation.Call,
+            "sanity: a benign module-path Call must go through"
+        );
+
+        _assertGuardRefusal(
+            rogue,
+            address(safe),
+            address(0xdead),
+            "",
+            Enum150.Operation.DelegateCall,
+            "SecondSign S001: module-path delegatecall refused",
+            "1.5.0: a module-path delegatecall must be refused"
+        );
         emit Assertion(
             "S001-5", "1.5.0: a module-path delegatecall was refused by the module guard"
         );
@@ -377,21 +406,23 @@ contract DoubleGuardTopologyTest {
         );
 
         // The owner path reverts (the tx guard is down)...
-        _assertTrue(
-            !_tryExec150(safe, address(0xdead), ""),
+        _assertOwnerPathReverts(
+            safe,
+            address(0xdead),
+            "",
+            "SecondSign S001: transaction guard is down",
             "owner path must be dead with the tx guard down"
         );
         // ...and the module path reverts (the module guard is down), including the
         // call that would remove either guard. No-bypass and recoverability are not
         // both available here: the account is bricked.
-        _assertTrue(
-            !_rogueTry150(
-                module,
-                address(safe),
-                address(safe),
-                abi.encodeWithSignature("setGuard(address)", address(0)),
-                Enum150.Operation.Call
-            ),
+        _assertGuardRefusal(
+            module,
+            address(safe),
+            address(safe),
+            abi.encodeWithSignature("setGuard(address)", address(0)),
+            Enum150.Operation.Call,
+            "SecondSign S001: module guard is down",
             "module path must be dead with the module guard down"
         );
         emit Assertion(
@@ -422,7 +453,7 @@ contract DoubleGuardTopologyTest {
 
     // --- execution helpers --------------------------------------------------
 
-    function _exec141(Safe141 safe, address, address to, bytes memory data) private {
+    function _exec141(Safe141 safe, address to, bytes memory data) private {
         _assertTrue(_tryExec141(safe, to, data), "a 1.4.1 setup transaction should have succeeded");
     }
 
@@ -458,10 +489,26 @@ contract DoubleGuardTopologyTest {
     }
 
     function _tryExec150(Safe150 safe, address to, bytes memory data) private returns (bool ok) {
-        bytes32 h = safe.getTransactionHash(
+        (ok,) = _ownerCall150(safe, to, data);
+    }
+
+    /// @dev The owner-signed `execTransaction` path, exposing both the success
+    /// flag and the revert reason so a caller can pin an expected refusal.
+    function _ownerCall150(Safe150 safe, address to, bytes memory data)
+        private
+        returns (bool ok, bytes memory ret)
+    {
+        (ok, ret) = address(safe).call(_execCalldata150(to, data, _sig(_txHash150(safe, to, data))));
+    }
+
+    function _txHash150(Safe150 safe, address to, bytes memory data)
+        private
+        view
+        returns (bytes32)
+    {
+        return safe.getTransactionHash(
             to, 0, data, Enum150.Operation.Call, 0, 0, 0, address(0), address(0), safe.nonce()
         );
-        (ok,) = address(safe).call(_execCalldata150(to, data, _sig(h)));
     }
 
     function _execCalldata150(address to, bytes memory data, bytes memory sig)
@@ -491,17 +538,66 @@ contract DoubleGuardTopologyTest {
 
     /// @dev A module transaction as a real rogue module makes it: a direct call to
     /// the Safe that reverts if the module guard refuses. Low-level here so the
-    /// test observes the refusal (ok == false) rather than reverting with it.
-    function _rogueTry150(
+    /// test observes the refusal (ok == false) *and its reason* rather than
+    /// reverting with it - the reason is what lets an assertion tell a guard
+    /// refusal from an unrelated revert.
+    function _rogueCall150(
         RogueModule rogue,
         address safe,
         address to,
         bytes memory data,
         Enum150.Operation op
-    ) private returns (bool ok) {
-        (ok,) = address(rogue).call(
+    ) private returns (bool ok, bytes memory ret) {
+        (ok, ret) = address(rogue).call(
             abi.encodeWithSelector(RogueModule.callFromModule150.selector, safe, to, data, op)
         );
+    }
+
+    /// @dev A benign module-path call the guard allows: the positive control that
+    /// proves the module is enabled and the path is live, so a refusal elsewhere
+    /// in the same test is the guard acting and not a broken setup.
+    function _assertModuleCallSucceeds(
+        RogueModule rogue,
+        address safe,
+        address to,
+        bytes memory data,
+        Enum150.Operation op,
+        string memory message
+    ) private {
+        (bool ok,) = _rogueCall150(rogue, safe, to, data, op);
+        _assertTrue(ok, message);
+    }
+
+    /// @dev A module-path attempt that MUST be refused *by our guard*: the call
+    /// reverts AND the revert carries the exact reason our guard raises. A bare
+    /// `!ok` would also pass on a GS-coded setup failure or a mis-encoded call;
+    /// pinning the reason is what keeps this evidence from passing vacuously.
+    function _assertGuardRefusal(
+        RogueModule rogue,
+        address safe,
+        address to,
+        bytes memory data,
+        Enum150.Operation op,
+        string memory expectedReason,
+        string memory message
+    ) private {
+        (bool ok, bytes memory ret) = _rogueCall150(rogue, safe, to, data, op);
+        _assertTrue(!ok, message);
+        _assertRevertIs(ret, expectedReason, message);
+    }
+
+    /// @dev An owner-path (`execTransaction`) attempt that must revert for the
+    /// given reason - the transaction-guard counterpart of `_assertGuardRefusal`.
+    function _assertOwnerPathReverts(
+        Safe150 safe,
+        address to,
+        bytes memory data,
+        string memory expectedReason,
+        string memory message
+    ) private {
+        (bool ok, bytes memory ret) = _ownerCall150(safe, to, data);
+        _assertTrue(!ok, message);
+        _assertRevertIs(ret, expectedReason, message);
     }
 
     function _installedGuard(address safe) private view returns (address) {
@@ -524,5 +620,18 @@ contract DoubleGuardTopologyTest {
 
     function _assertEqStr(string memory a, string memory b, string memory message) private pure {
         if (keccak256(bytes(a)) != keccak256(bytes(b))) revert(message);
+    }
+
+    /// @dev Assert `ret` is exactly `Error(string)` carrying `expectedReason`. A
+    /// revert bubbles up as `abi.encodeWithSignature("Error(string)", reason)`, so
+    /// matching the whole payload pins the refusal to a specific `revert("...")`
+    /// and rejects any other revert (GS codes, a different guard message).
+    function _assertRevertIs(bytes memory ret, string memory expectedReason, string memory message)
+        private
+        pure
+    {
+        if (keccak256(ret) != keccak256(abi.encodeWithSignature("Error(string)", expectedReason))) {
+            revert(string.concat(message, " (revert reason was not the guard's)"));
+        }
     }
 }
