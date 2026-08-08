@@ -25,7 +25,10 @@ import {BaseModuleGuard} from "safe-1.5.0/contracts/base/ModuleManager.sol";
 ///   2. a transaction guard is invoked on the guarded (`execTransaction`) path;
 ///   3. on 1.4.1, an enabled module clears the guard with NO guard hook invoked -
 ///      the failure is reproduced;
-///   4. on 1.5.0, the module guard refuses that same call;
+///   4. on 1.5.0, the module guard refuses that same guard-clearing call;
+///   4b. on 1.5.0, the module guard also refuses the module-path call that would
+///       remove the module guard *itself* - closing the self-teardown that would
+///       otherwise clear the transaction guard on a now-unguarded module path;
 ///   5. on 1.5.0, a module-path delegatecall is refused;
 ///   6. two permanently reverting guards brick the account - the double-failure
 ///      residual risk, recorded rather than presented as solved.
@@ -81,6 +84,7 @@ contract Recorder141 is BaseGuard {
 /// path - it is a test double for the topology, not a production guard.
 contract ModuleGuard150 is BaseModuleGuard {
     bytes4 private constant SET_GUARD = bytes4(keccak256("setGuard(address)"));
+    bytes4 private constant SET_MODULE_GUARD = bytes4(keccak256("setModuleGuard(address)"));
 
     function checkModuleTransaction(
         address to,
@@ -92,8 +96,15 @@ contract ModuleGuard150 is BaseModuleGuard {
         if (operation == Enum150.Operation.DelegateCall) {
             revert("SecondSign S001: module-path delegatecall refused");
         }
-        if (to == msg.sender && data.length >= 4 && bytes4(data) == SET_GUARD) {
-            revert("SecondSign S001: module-path guard change refused");
+        // A self-call that changes EITHER guard is a guard-config change, and the
+        // module path must never make one - not the transaction guard (test 4)
+        // and not the module guard itself (a module that could remove this guard
+        // could then clear the transaction guard on an unguarded module path).
+        if (to == msg.sender && data.length >= 4) {
+            bytes4 selector = bytes4(data);
+            if (selector == SET_GUARD || selector == SET_MODULE_GUARD) {
+                revert("SecondSign S001: module-path guard change refused");
+            }
         }
         return bytes32(0);
     }
@@ -157,6 +168,9 @@ contract DoubleGuardTopologyTest {
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
     bytes32 private constant GUARD_SLOT =
         0x4a204f620c8c5ccdca3fd54d003badd85ba500436a431f0cbda4f558c93c34c8;
+    // keccak256("module_manager.module_guard.address") - Safe 1.5.0 ModuleManager
+    bytes32 private constant MODULE_GUARD_SLOT =
+        0xb104e0b93118902c651344349b610029d694cfdec91c589c91ebafbcd0289947;
     uint256 private constant AGENT_PK = 0xA11CE;
 
     event Assertion(string id, string what);
@@ -266,6 +280,56 @@ contract DoubleGuardTopologyTest {
         );
         emit Assertion(
             "S001-4", "1.5.0: the module guard refused the same module-path guard-clearing call"
+        );
+    }
+
+    // --- 4b. the module guard refuses removing ITSELF (self-teardown) -------
+
+    /// @dev The bypass the double guard must actually close. A rogue module that
+    /// cannot clear the transaction guard (test 4) instead removes the *module*
+    /// guard first, then clears the transaction guard on a now-unguarded module
+    /// path. A module guard that refuses only `setGuard` leaves this open. The
+    /// evidence is state-based, not a bare `!ok`: a benign module call proves the
+    /// path is live (so a later refusal is the guard's doing, not a broken setup),
+    /// and the module-guard slot proves the guard was never removed.
+    function test_1_5_0_theModuleGuardRefusesRemovingItself() public {
+        (Safe150 safe,) = _deploy150();
+        ModuleGuard150 moduleGuard = new ModuleGuard150();
+        RogueModule rogue = new RogueModule();
+
+        _exec150(
+            safe,
+            address(safe),
+            abi.encodeWithSignature("setModuleGuard(address)", address(moduleGuard))
+        );
+        _exec150(
+            safe, address(safe), abi.encodeWithSignature("enableModule(address)", address(rogue))
+        );
+
+        // Positive control: a benign module-path call the guard allows goes
+        // through, so the refusal below is the guard acting, not a broken setup.
+        _assertTrue(
+            _rogueTry150(rogue, address(safe), address(0xbeef), "", Enum150.Operation.Call),
+            "sanity: a benign module-path call must go through"
+        );
+
+        // The attack: remove the module guard itself down the module path.
+        bool ok = _rogueTry150(
+            rogue,
+            address(safe),
+            address(safe),
+            abi.encodeWithSignature("setModuleGuard(address)", address(0)),
+            Enum150.Operation.Call
+        );
+        _assertTrue(!ok, "1.5.0: the module guard must refuse a module-path setModuleGuard");
+        _assertEqAddr(
+            _installedModuleGuard(address(safe)),
+            address(moduleGuard),
+            "1.5.0: the module guard must still be installed after the attempt"
+        );
+        emit Assertion(
+            "S001-4b",
+            "1.5.0: the module guard refused the module-path call that would remove itself"
         );
     }
 
@@ -442,6 +506,10 @@ contract DoubleGuardTopologyTest {
 
     function _installedGuard(address safe) private view returns (address) {
         return address(uint160(uint256(vm.load(safe, GUARD_SLOT))));
+    }
+
+    function _installedModuleGuard(address safe) private view returns (address) {
+        return address(uint160(uint256(vm.load(safe, MODULE_GUARD_SLOT))));
     }
 
     // --- assertions ---------------------------------------------------------
