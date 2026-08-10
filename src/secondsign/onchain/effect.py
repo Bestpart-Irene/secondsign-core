@@ -69,8 +69,10 @@ class SafeCall(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     to: str = Field(pattern=_ADDRESS)
-    #: Native value in wei. Non-negative; a uint256, so unbounded above.
-    value: int = Field(ge=0)
+    #: Native value in wei. A uint256: non-negative and below ``2**256`` — the
+    #: upper bound matters because the value is ABI-encoded as a uint256 when the
+    #: transaction hash is built, and an out-of-range int would raise there.
+    value: int = Field(ge=0, lt=1 << 256)
     #: ``0x`` then whole bytes. The pattern's paired hex enforces even length, so
     #: a nibble-length calldata is rejected here rather than read past its end.
     data: str = Field(pattern=_CALLDATA)
@@ -100,6 +102,11 @@ class OnchainEffect(BaseModel):
     kind: EffectKind
     #: The contract the call is aimed at (``SafeCall.to``).
     target: str = Field(pattern=_ADDRESS)
+    #: The native value (wei) the transaction carries alongside its calldata. The
+    #: first-cut model has no native-value dimension, so any non-zero value is an
+    #: effect outside the model — carried here so the policy can refuse it rather
+    #: than judge the calldata and silently ignore the value moving with it.
+    native_value: int = Field(default=0, ge=0)
     #: The spender (approval) or recipient (transfer); absent otherwise.
     counterparty: str | None = Field(default=None, pattern=_ADDRESS)
     #: The allowance (approval) or amount (transfer), a uint256 — unbounded above,
@@ -123,13 +130,21 @@ class SafeAdapter:
         self._safe = safe_address.lower()
 
     def decode(self, call: SafeCall) -> OnchainEffect:
+        # The native value rides along on every kind: it is judged separately from
+        # the calldata, so it must reach the policy whatever the calldata decodes to.
         if call.operation is SafeOperation.delegatecall:
             return OnchainEffect(
-                kind=EffectKind.delegatecall, target=call.to, selector=_selector(call.data)
+                kind=EffectKind.delegatecall,
+                target=call.to,
+                selector=_selector(call.data),
+                native_value=call.value,
             )
         if call.to.lower() == self._safe:
             return OnchainEffect(
-                kind=EffectKind.self_administration, target=call.to, selector=_selector(call.data)
+                kind=EffectKind.self_administration,
+                target=call.to,
+                selector=_selector(call.data),
+                native_value=call.value,
             )
         selector = _selector(call.data)
         if selector in (_APPROVE, _TRANSFER) and len(call.data) >= _ARGS_TWO_WORDS:
@@ -141,8 +156,14 @@ class SafeAdapter:
                 counterparty=counterparty,
                 amount=amount,
                 selector=selector,
+                native_value=call.value,
             )
-        return OnchainEffect(kind=EffectKind.unrecognised, target=call.to, selector=selector)
+        return OnchainEffect(
+            kind=EffectKind.unrecognised,
+            target=call.to,
+            selector=selector,
+            native_value=call.value,
+        )
 
 
 def _selector(data: str) -> str | None:

@@ -43,6 +43,11 @@ Architecture = "https://github.com/Bestpart-Irene/secondsign-core/blob/main/docs
 # The Stripe rail is opt-in: the deterministic core needs no payment SDK, so
 # only a deployment that wires the Stripe executor installs it.
 stripe = ["stripe>=15,<16"]
+# On-chain co-signing is opt-in the same way: the deterministic core needs no
+# Ethereum crypto, so only a deployment that co-signs Safe transactions installs
+# it. Keeping it optional is what keeps `[project].dependencies` a single entry
+# and cryptography out of the default runtime.
+onchain = ["eth-account>=0.13,<0.14"]
 dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
@@ -52,6 +57,7 @@ dev = [
     "mypy==2.3.0",
     "pyyaml==6.0.3",
     "stripe==15.3.1",
+    "eth-account==0.13.7",
     # Generates the reference deployment's ephemeral PKI. Development only — it
     # is not a runtime dependency and must never become one; `[project]` keeps
     # exactly one, and the licence gate inspects the built wheel rather than the
