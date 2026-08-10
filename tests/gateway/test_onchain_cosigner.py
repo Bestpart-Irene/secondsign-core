@@ -62,6 +62,30 @@ def test_the_hash_matches_the_real_safe_getTransactionHash():
     assert safe_transaction_hash(call, context, nonce=0) == _GOLDEN_HASH
 
 
+# A second golden captured the same way (Safe 1.5.0's own getTransactionHash) but
+# on a *different* shape than the first: a non-mainnet chain id, a delegatecall
+# operation, and a nonzero nonce. The first golden fixes only chain 1 / call /
+# nonce 0, so a bug in packing the chain id, the operation byte, or the nonce
+# would pass it; this one catches those. Captured from a real Safe 1.5.0 proxy at
+# 0x2e23…470b: chain 8453, to=0x1111…1111, data=0xdeadbeef, DelegateCall, nonce 5.
+_GOLDEN2_CHAIN = 8453
+_GOLDEN2_TO = "0x1111111111111111111111111111111111111111"
+_GOLDEN2_DATA = "0xdeadbeef"
+_GOLDEN2_NONCE = 5
+_GOLDEN2_HASH = bytes.fromhex("52178f40a03b4cc044824cd216ad5caf32b885616ae40bece1fa48d876bca6bf")
+
+
+def test_the_hash_matches_the_real_safe_for_a_delegatecall_on_another_chain():
+    call = SafeCall(
+        to=_GOLDEN2_TO,
+        value=0,
+        data=_GOLDEN2_DATA,
+        operation=SafeOperation.delegatecall,
+    )
+    context = SafeContext(safe_address=_GOLDEN_SAFE, chain_id=_GOLDEN2_CHAIN)
+    assert safe_transaction_hash(call, context, nonce=_GOLDEN2_NONCE) == _GOLDEN2_HASH
+
+
 def test_an_allowed_action_is_signed_and_the_signature_recovers_to_the_cosigner():
     context = SafeContext(safe_address=_GOLDEN_SAFE, chain_id=_GOLDEN_CHAIN)
     cosigner = OnchainCosigner(
@@ -367,3 +391,113 @@ def test_the_held_review_shows_the_amount_and_limit_to_the_human():
     # Not a bare "value exceeded" sentence: the magnitude and threshold are shown.
     assert finding.observed == 500
     assert finding.limit == 100
+
+
+def test_a_signature_is_recorded_in_the_audit_trail():
+    from secondsign.audit import InMemoryAuditSink, verify_chain
+    from secondsign.decision import DecisionVerdict
+
+    sink = InMemoryAuditSink()
+    cosigner = OnchainCosigner(
+        _KEY,
+        _context(),
+        approval_cap=1_000,
+        approve_spender_allowlist=frozenset({_GOLDEN_SPENDER}),
+        audit_sink=sink,
+    )
+    call = SafeCall(
+        to=_GOLDEN_TO,
+        value=0,
+        data=_approve_data(_GOLDEN_SPENDER, 100),
+        operation=SafeOperation.call,
+    )
+    cosigner.cosign(call, nonce=0, proposer=_PROPOSER, now=_NOW)
+    (receipt,) = sink.entries()
+    assert receipt.verdict is DecisionVerdict.ALLOW
+    # The digest names the exact transaction that was co-signed.
+    assert receipt.digest.value == safe_transaction_hash(call, _context(), 0).hex()
+    assert verify_chain(sink.entries())
+
+
+def test_a_refusal_is_recorded_in_the_audit_trail():
+    from secondsign.audit import InMemoryAuditSink
+    from secondsign.decision import DecisionVerdict
+
+    sink = InMemoryAuditSink()
+    cosigner = OnchainCosigner(_KEY, _context(), approval_cap=1_000, audit_sink=sink)
+    # An unlisted spender: a policy DENY on a well-formed call.
+    call = SafeCall(
+        to=_GOLDEN_TO,
+        value=0,
+        data=_approve_data(_GOLDEN_SPENDER, 100),
+        operation=SafeOperation.call,
+    )
+    cosigner.cosign(call, nonce=0, proposer=_PROPOSER, now=_NOW)
+    (receipt,) = sink.entries()
+    assert receipt.verdict is DecisionVerdict.DENY
+
+
+def test_a_held_review_and_its_decline_are_both_recorded():
+    from secondsign.audit import InMemoryAuditSink
+    from secondsign.decision import DecisionVerdict
+
+    sink = InMemoryAuditSink()
+    cosigner = OnchainCosigner(
+        _KEY,
+        _context(),
+        approval_cap=1_000,
+        review_above=100,
+        approve_spender_allowlist=frozenset({_GOLDEN_SPENDER}),
+        audit_sink=sink,
+    )
+    held = cosigner.cosign(_review_call(), nonce=0, proposer=_PROPOSER, now=_NOW)
+    cosigner.resolve(
+        held.approval_id,
+        _checker_verdict(held.approval_id, subject="checker-a", approved=False),
+        now=_NOW,
+    )
+    verdicts = [r.verdict for r in sink.entries()]
+    assert verdicts == [DecisionVerdict.REVIEW, DecisionVerdict.DENY]
+    # Both receipts name the held transaction, and the decline is not silent.
+    assert all(r.approval_id == held.approval_id for r in sink.entries())
+
+
+def test_a_review_signed_after_approval_is_recorded():
+    from secondsign.audit import InMemoryAuditSink
+    from secondsign.decision import DecisionVerdict
+
+    sink = InMemoryAuditSink()
+    cosigner = OnchainCosigner(
+        _KEY,
+        _context(),
+        approval_cap=1_000,
+        review_above=100,
+        approve_spender_allowlist=frozenset({_GOLDEN_SPENDER}),
+        audit_sink=sink,
+    )
+    held = cosigner.cosign(_review_call(), nonce=0, proposer=_PROPOSER, now=_NOW)
+    cosigner.resolve(held.approval_id, _checker_verdict(held.approval_id), now=_NOW)
+    verdicts = [r.verdict for r in sink.entries()]
+    assert verdicts == [DecisionVerdict.REVIEW, DecisionVerdict.ALLOW]
+
+
+def test_a_malformed_request_writes_no_receipt():
+    from secondsign.audit import InMemoryAuditSink
+
+    sink = InMemoryAuditSink()
+    cosigner = OnchainCosigner(
+        _KEY,
+        _context(),
+        approval_cap=1_000,
+        approve_spender_allowlist=frozenset({_GOLDEN_SPENDER}),
+        audit_sink=sink,
+    )
+    call = SafeCall(
+        to=_GOLDEN_TO,
+        value=0,
+        data=_approve_data(_GOLDEN_SPENDER, 100),
+        operation=SafeOperation.call,
+    )
+    # An out-of-range nonce is rejected before anything is judged — nothing to record.
+    cosigner.cosign(call, nonce=2**256, proposer=_PROPOSER, now=_NOW)
+    assert sink.entries() == ()

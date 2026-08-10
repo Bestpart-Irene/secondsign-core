@@ -34,12 +34,22 @@ from typing import Any, Final
 
 from secondsign.approval import CheckerVerdict, MakerChecker, MakerIdentity, Rejected
 from secondsign.approval.maker_checker import PendingApproval, RejectionReason
+from secondsign.audit import AuditLog, AuditSink, InMemoryAuditSink
 from secondsign.contracts import Finding, ReasonCode
 from secondsign.decision import Decision, DecisionVerdict
 from secondsign.intent import IntentDigest, ProposalDigest
 from secondsign.onchain import policy
 from secondsign.onchain.effect import SafeAdapter, SafeCall, SafeOperation
 from secondsign.onchain.types import OnchainJudgement, OnchainVerdict
+
+#: The on-chain verdict lattice mirrors the plugin one, so it maps onto the fiat
+#: decision verdict the audit receipt records exactly as the decision engine does:
+#: ABSTAIN (no concern) is the on-chain ALLOW, and REVIEW/DENY carry across.
+_VERDICT_TO_DECISION: dict[OnchainVerdict, DecisionVerdict] = {
+    OnchainVerdict.ABSTAIN: DecisionVerdict.ALLOW,
+    OnchainVerdict.REVIEW: DecisionVerdict.REVIEW,
+    OnchainVerdict.DENY: DecisionVerdict.DENY,
+}
 
 #: How long an on-chain review stays answerable — long enough for a human in
 #: another timezone, short enough that an unanswered approval dies. Mirrors the
@@ -202,6 +212,7 @@ class OnchainCosigner:
         review_above: int | None = None,
         approve_spender_allowlist: frozenset[str] = frozenset(),
         review_ttl: timedelta = REVIEW_TTL,
+        audit_sink: AuditSink | None = None,
     ) -> None:
         _, _, account_cls = _load()
         self._account = account_cls.from_key(private_key)
@@ -212,6 +223,14 @@ class OnchainCosigner:
         self._approve_spender_allowlist = approve_spender_allowlist
         self._review_ttl = review_ttl
         self._maker_checker = MakerChecker()
+        # The append-only, hash-chained trail. Every judged outcome — a signature
+        # produced, a review held, a refusal, a decline — is recorded, so a
+        # co-signature that moved value is never trailless. A deployment supplies a
+        # durable sink; the in-memory reference is enough standalone. The receipt
+        # captures the verdict, the transaction-hash digest and the approval id;
+        # the on-chain reason codes ride on the returned outcome, not the fiat
+        # receipt vocabulary.
+        self._audit = AuditLog(audit_sink if audit_sink is not None else InMemoryAuditSink())
         self._pending: dict[str, _HeldReview] = {}
         #: Approval ids whose review has already been granted and signed. A
         #: re-proposal of an already-signed transaction must not be re-held under
@@ -239,6 +258,22 @@ class OnchainCosigner:
     def _sign(self, tx_hash: bytes) -> str:
         return "0x" + self._account.unsafe_sign_hash(tx_hash).signature.hex()
 
+    def _record(
+        self, tx_hash: bytes, verdict: OnchainVerdict, *, approval_id: str | None = None
+    ) -> None:
+        """Append one receipt for a judged outcome — the on-chain audit trail.
+
+        The transaction hash is the digest, so the trail names the exact
+        transaction the co-signer signed, held or refused (INV-11 on the on-chain
+        path). ``outcome_status`` stays ``None``: the co-signer signs, it does not
+        dispatch, so there is no execution outcome to record here.
+        """
+        self._audit.record(
+            digest=IntentDigest(value=tx_hash.hex()),
+            verdict=_VERDICT_TO_DECISION[verdict],
+            approval_id=approval_id,
+        )
+
     def cosign(self, call: SafeCall, nonce: int, *, proposer: str, now: datetime) -> CosignOutcome:
         """Decode, judge, and either sign, hold for a human, or refuse.
 
@@ -263,11 +298,14 @@ class OnchainCosigner:
             return self._hold(
                 safe_transaction_hash(call, self._context, nonce), proposer, now, judgement
             )
+        tx_hash = safe_transaction_hash(call, self._context, nonce)
         if judgement.verdict is OnchainVerdict.ABSTAIN:
-            tx_hash = safe_transaction_hash(call, self._context, nonce)
+            signature = self._sign(tx_hash)
+            self._record(tx_hash, OnchainVerdict.ABSTAIN)
             return CosignOutcome(
-                status=CosignStatus.signed, judgement=judgement, signature=self._sign(tx_hash)
+                status=CosignStatus.signed, judgement=judgement, signature=signature
             )
+        self._record(tx_hash, OnchainVerdict.DENY)
         return CosignOutcome(status=CosignStatus.refused, judgement=judgement)
 
     def _hold(
@@ -325,6 +363,7 @@ class OnchainCosigner:
             self._pending[approval_id] = _HeldReview(
                 tx_hash=tx_hash, approval=approval, judgement=judgement
             )
+            self._record(tx_hash, OnchainVerdict.REVIEW, approval_id=approval_id)
             return CosignOutcome(
                 status=CosignStatus.held, judgement=judgement, approval_id=approval_id
             )
@@ -365,13 +404,18 @@ class OnchainCosigner:
             if isinstance(consumed, Rejected):
                 if consumed.reason in _TERMINAL_REJECTIONS:
                     # A decline or expiry settles the review; it must leave the
-                    # queue so it cannot be re-answered (approver shopping).
+                    # queue so it cannot be re-answered (approver shopping), and
+                    # the settlement is recorded — the trail shows a review was
+                    # refused, not just that it went quiet.
                     del self._pending[approval_id]
+                    self._record(held.tx_hash, OnchainVerdict.DENY, approval_id=approval_id)
                 return CosignOutcome(status=CosignStatus.refused, judgement=held.judgement)
             del self._pending[approval_id]
             self._settled.add(approval_id)
+            signature = self._sign(held.tx_hash)
+            self._record(held.tx_hash, OnchainVerdict.ABSTAIN, approval_id=approval_id)
             return CosignOutcome(
                 status=CosignStatus.signed,
                 judgement=held.judgement,
-                signature=self._sign(held.tx_hash),
+                signature=signature,
             )
