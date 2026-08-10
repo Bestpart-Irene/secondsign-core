@@ -56,6 +56,7 @@ class OnchainReasonCode(StrEnum):
 
     unbounded_approval = "unbounded_approval"
     counterparty_not_allowlisted = "counterparty_not_allowlisted"
+    token_not_allowlisted = "token_not_allowlisted"  # noqa: S105 — a reason code, not a secret
     unrecognised_authorisation = "unrecognised_authorisation"
     structural_change = "structural_change"
     delegatecall = "delegatecall"
@@ -82,6 +83,10 @@ RED_TEAM_COVERAGE: dict[OnchainReasonCode, frozenset[str]] = {
     # approval to an un-vouched party is the arbitrary/multi-spender exposure of
     # C-RT-001/003/004, not merely an over-cap amount.
     OnchainReasonCode.counterparty_not_allowlisted: frozenset({"C-RT-001", "C-RT-003", "C-RT-004"}),
+    # A token that is not the pinned asset — an unknown or look-alike contract, or
+    # a proxy whose identity cannot be vouched for. Treated as an unknown contract
+    # (C-RT-011) and an asset-identity failure (C-RT-024), both DENY.
+    OnchainReasonCode.token_not_allowlisted: frozenset({"C-RT-011", "C-RT-024"}),
     OnchainReasonCode.unrecognised_authorisation: frozenset({"C-RT-006"}),
     OnchainReasonCode.structural_change: frozenset({"C-RT-007", "C-RT-008", "C-RT-016"}),
     OnchainReasonCode.delegatecall: frozenset({"C-RT-009"}),

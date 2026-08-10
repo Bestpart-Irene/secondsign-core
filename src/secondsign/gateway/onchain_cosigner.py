@@ -39,8 +39,14 @@ from secondsign.contracts import Finding, ReasonCode
 from secondsign.decision import Decision, DecisionVerdict
 from secondsign.intent import IntentDigest, ProposalDigest
 from secondsign.onchain import policy
+from secondsign.onchain.chain_state import ChainStateReader, ExpectedSafeConfig
 from secondsign.onchain.effect import SafeAdapter, SafeCall, SafeOperation
-from secondsign.onchain.types import OnchainJudgement, OnchainVerdict
+from secondsign.onchain.types import (
+    OnchainFinding,
+    OnchainJudgement,
+    OnchainReasonCode,
+    OnchainVerdict,
+)
 
 #: The on-chain verdict lattice mirrors the plugin one, so it maps onto the fiat
 #: decision verdict the audit receipt records exactly as the decision engine does:
@@ -64,12 +70,6 @@ REVIEW_TTL: timedelta = timedelta(hours=4)
 _TERMINAL_REJECTIONS: Final[frozenset[RejectionReason]] = frozenset(
     {RejectionReason.not_approved, RejectionReason.expired}
 )
-
-#: A uint256 ceiling: ``value`` and ``nonce`` are ABI-encoded as ``uint256`` when
-#: the transaction hash is built, so anything at or above this is not a valid Safe
-#: transaction field and is refused before it reaches ``eth_abi`` (which would
-#: raise rather than return a clean refusal).
-_UINT256 = 1 << 256
 
 _DOMAIN_TYPEHASH_TEXT = "EIP712Domain(uint256 chainId,address verifyingContract)"
 _SAFE_TX_TYPEHASH_TEXT = (
@@ -193,6 +193,19 @@ class _HeldReview:
     tx_hash: bytes
     approval: PendingApproval
     judgement: OnchainJudgement
+    #: The chain nonce the held transaction hash was built against. If the chain
+    #: nonce has advanced by the time a checker answers, the held content can no
+    #: longer be the account's next transaction — it is stale and refuses.
+    nonce: int
+
+
+def _drift_judgement(reasons: tuple[OnchainReasonCode, ...]) -> OnchainJudgement:
+    """A DENY judgement carrying the chain-re-verification mismatches, so a refusal
+    on drift is as auditable as one from the policy."""
+    return OnchainJudgement(
+        verdict=OnchainVerdict.DENY,
+        findings=tuple(OnchainFinding(code=reason) for reason in reasons),
+    )
 
 
 class OnchainCosigner:
@@ -209,16 +222,31 @@ class OnchainCosigner:
         context: SafeContext,
         *,
         approval_cap: int,
+        reader: ChainStateReader | None = None,
+        expected: ExpectedSafeConfig | None = None,
         review_above: int | None = None,
         approve_spender_allowlist: frozenset[str] = frozenset(),
         review_ttl: timedelta = REVIEW_TTL,
         audit_sink: AuditSink | None = None,
     ) -> None:
+        if expected is not None and expected.chain_id != context.chain_id:
+            # The hash domain is built from the context's chain id; re-verification
+            # attests to the expected one. If they disagree the co-signer would
+            # verify against one chain and sign for another — a config error.
+            raise ValueError("context.chain_id and expected.chain_id must agree")
         _, _, account_cls = _load()
         self._account = account_cls.from_key(private_key)
         self._context = context
         self._adapter = SafeAdapter(context.safe_address)
         self._approval_cap = approval_cap
+        #: The chain reader and the attested configuration. Both are required to
+        #: sign: a co-signer wired without them re-verifies nothing and so refuses
+        #: (fail-closed) rather than trusting the caller for the account and token.
+        self._reader = reader
+        self._expected = expected
+        #: The pinned token: the policy denies a token operation whose target is
+        #: not this asset. Empty (fail-closed) until an ExpectedSafeConfig pins one.
+        self._token_allowlist = frozenset({expected.token}) if expected is not None else frozenset()
         self._review_above = review_above
         self._approve_spender_allowlist = approve_spender_allowlist
         self._review_ttl = review_ttl
@@ -253,7 +281,21 @@ class OnchainCosigner:
             approval_cap=self._approval_cap,
             review_above=self._review_above,
             approve_spender_allowlist=self._approve_spender_allowlist,
+            token_allowlist=self._token_allowlist,
         )
+
+    def _reverify(self) -> tuple[int, tuple[OnchainReasonCode, ...]] | None:
+        """Read the Safe's live state and the pinned token's identity, and return
+        the chain nonce with the mismatches against the attested configuration.
+
+        ``None`` means the co-signer is not wired to verify — no reader or no
+        attested config — which is refusal, not a fallback to trusting the caller.
+        """
+        if self._reader is None or self._expected is None:
+            return None
+        state = self._reader.read_safe(self._context.safe_address)
+        token = self._reader.token_identity(self._expected.token)
+        return state.nonce, self._expected.mismatches(state, token)
 
     def _sign(self, tx_hash: bytes) -> str:
         return "0x" + self._account.unsafe_sign_hash(tx_hash).signature.hex()
@@ -274,20 +316,29 @@ class OnchainCosigner:
             approval_id=approval_id,
         )
 
-    def cosign(self, call: SafeCall, nonce: int, *, proposer: str, now: datetime) -> CosignOutcome:
-        """Decode, judge, and either sign, hold for a human, or refuse.
+    def cosign(self, call: SafeCall, *, proposer: str, now: datetime) -> CosignOutcome:
+        """Re-verify the chain, decode, judge, and either sign, hold, or refuse.
 
-        ``proposer`` is the maker — the principal that proposed the transaction —
-        recorded so a checker who later approves cannot be the same principal.
-        ``now`` must be timezone-aware, and ``nonce`` a uint256; a naive datetime
-        or an out-of-range field is a caller error, refused before any hashing.
+        The nonce is read from the Safe's live state, never taken from the caller.
+        Before anything is judged the account and the pinned token are confirmed to
+        match the attested configuration; any drift, or a co-signer not wired to
+        verify, refuses. ``proposer`` is the maker — the principal that proposed
+        the transaction — recorded so a checker who later approves cannot be the
+        same principal. ``now`` must be timezone-aware.
         """
         _require_aware(now)
-        # `value` is bounded by SafeCall; `nonce` is a bare parameter, so it is
-        # range-checked here — an out-of-range uint256 would raise inside eth_abi
-        # rather than return a clean refusal.
-        if not 0 <= nonce < _UINT256:
+        verified = self._reverify()
+        if verified is None:
+            # No reader / no attested config: the account and token cannot be
+            # confirmed, so refuse. Absence is refusal, not a trust of the caller.
             return CosignOutcome(status=CosignStatus.refused)
+        nonce, drift = verified
+        tx_hash = safe_transaction_hash(call, self._context, nonce)
+        if drift:
+            # The live account or the pinned token has drifted from what was
+            # attested — refuse before judging the call, and record it (C4).
+            self._record(tx_hash, OnchainVerdict.DENY)
+            return CosignOutcome(status=CosignStatus.refused, judgement=_drift_judgement(drift))
         judgement = self._judge(call)
         # Fail-closed at the signing boundary: ABSTAIN — the absence of any concern
         # — is the *only* state that signs, REVIEW holds for a human, and every
@@ -295,10 +346,7 @@ class OnchainCosigner:
         # Signing on "not DENY" would treat silence as consent and hand a
         # signature to any effect a first-cut policy has not yet learned to name.
         if judgement.verdict is OnchainVerdict.REVIEW:
-            return self._hold(
-                safe_transaction_hash(call, self._context, nonce), proposer, now, judgement
-            )
-        tx_hash = safe_transaction_hash(call, self._context, nonce)
+            return self._hold(tx_hash, nonce, proposer, now, judgement)
         if judgement.verdict is OnchainVerdict.ABSTAIN:
             signature = self._sign(tx_hash)
             self._record(tx_hash, OnchainVerdict.ABSTAIN)
@@ -311,6 +359,7 @@ class OnchainCosigner:
     def _hold(
         self,
         tx_hash: bytes,
+        nonce: int,
         proposer: str,
         now: datetime,
         judgement: OnchainJudgement,
@@ -361,7 +410,7 @@ class OnchainCosigner:
                 expires_at=now + self._review_ttl,
             )
             self._pending[approval_id] = _HeldReview(
-                tx_hash=tx_hash, approval=approval, judgement=judgement
+                tx_hash=tx_hash, approval=approval, judgement=judgement, nonce=nonce
             )
             self._record(tx_hash, OnchainVerdict.REVIEW, approval_id=approval_id)
             return CosignOutcome(
@@ -389,17 +438,33 @@ class OnchainCosigner:
         second checker cannot approve what the first declined; a malformed or
         self-approval answer leaves the review answerable by a correct one.
 
-        A re-decision before consuming is deliberately absent while the policy is
-        stateless: a held action re-judges to the same REVIEW, so it would change
-        nothing. When the policy gains external state that can tighten a held
-        action (a velocity window, as the fiat gateway has), re-decide-before-
-        consume must return here, exactly as ``AuthorizationService.resolve`` does.
+        The chain is re-verified before the answer is consumed, so drift or a stale
+        nonce refuses **without burning the human's answer** — re-decision, not
+        re-approval (ADR 0005 applied to the chain moving). Only once the live
+        account still matches and the held nonce is still current is the one-shot
+        spent and the signature produced.
         """
         _require_aware(now)
         with self._lock:
             held = self._pending.get(approval_id)
             if held is None:
                 return CosignOutcome(status=CosignStatus.refused)
+            verified = self._reverify()
+            if verified is None:
+                return CosignOutcome(status=CosignStatus.refused)
+            nonce, drift = verified
+            if drift or nonce != held.nonce:
+                # The account drifted, or the chain nonce advanced past the one the
+                # held transaction was built for. Either way the approved content is
+                # no longer the account's next transaction: refuse and record, but
+                # do not consume — the human's answer is not the problem.
+                reasons = list(drift)
+                if nonce != held.nonce and OnchainReasonCode.effect_outside_model not in reasons:
+                    reasons.append(OnchainReasonCode.effect_outside_model)
+                self._record(held.tx_hash, OnchainVerdict.DENY, approval_id=approval_id)
+                return CosignOutcome(
+                    status=CosignStatus.refused, judgement=_drift_judgement(tuple(reasons))
+                )
             consumed = self._maker_checker.consume(held.approval, verdict, now=now)
             if isinstance(consumed, Rejected):
                 if consumed.reason in _TERMINAL_REJECTIONS:
