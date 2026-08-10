@@ -94,13 +94,38 @@ def test_an_unrecognised_call_is_denied():
     assert judgement.reasons == (OnchainReasonCode.unknown_selector,)
 
 
-def test_an_approval_with_no_amount_is_treated_as_zero_and_allowed():
+def test_an_approval_with_an_undetermined_amount_is_denied():
+    # amount=None is not zero — it is an amount the effect model could not
+    # establish (fee-on-transfer, proxy indirection), and an unknown magnitude on
+    # a value-moving call fails closed rather than passing as a harmless zero.
     judgement = policy.evaluate(
         _effect(EffectKind.erc20_approval, None),
         approval_cap=_CAP,
         approve_spender_allowlist=_ALLOWED,
     )
-    assert judgement.verdict is OnchainVerdict.ABSTAIN
+    assert judgement.verdict is OnchainVerdict.DENY
+    assert judgement.reasons == (OnchainReasonCode.effect_outside_model,)
+
+
+def test_a_transfer_with_an_undetermined_amount_is_denied():
+    judgement = policy.evaluate(_effect(EffectKind.erc20_transfer, None), approval_cap=_CAP)
+    assert judgement.verdict is OnchainVerdict.DENY
+    assert judgement.reasons == (OnchainReasonCode.effect_outside_model,)
+
+
+def test_native_value_alongside_a_bounded_call_is_denied():
+    # The second drain: a bounded approve carrying huge native value. The calldata
+    # alone is concern-free, but the value moving with it is outside the model.
+    effect = OnchainEffect(
+        kind=EffectKind.erc20_approval,
+        target=_TOKEN,
+        counterparty=_SPENDER,
+        amount=100,
+        native_value=10**21,
+    )
+    judgement = policy.evaluate(effect, approval_cap=_CAP, approve_spender_allowlist=_ALLOWED)
+    assert judgement.verdict is OnchainVerdict.DENY
+    assert judgement.reasons == (OnchainReasonCode.effect_outside_model,)
 
 
 def test_an_amount_in_the_review_band_is_held_for_a_human():

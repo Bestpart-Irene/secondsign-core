@@ -131,6 +131,12 @@ AGENT_SURFACE: Final[str] = "secondsign.agent"
 #: - `decision` reads the limits (`PolicyContext`) to decide. The deciding half
 #:   of the control plane is the control plane; what is safe for both sides is
 #:   the contract it serves, not the engine that serves it.
+#: - `onchain.policy` is the on-chain deciding half — it judges a decoded effect
+#:   into a verdict, the exact role `policy`/`decision` play for the fiat path. It
+#:   is the one submodule of the otherwise-`shared` `secondsign.onchain` package
+#:   that decides rather than describes, so it is control plane while the on-chain
+#:   vocabulary and adapter beside it stay shared. Checked before the shared
+#:   blanket by `classify`, so this narrower prefix wins.
 _CONTROL_PLANE_PREFIXES: Final[tuple[str, ...]] = (
     "secondsign.approval",
     "secondsign.audit",
@@ -138,6 +144,7 @@ _CONTROL_PLANE_PREFIXES: Final[tuple[str, ...]] = (
     "secondsign.controlplane",
     "secondsign.decision",
     "secondsign.gateway",
+    "secondsign.onchain.policy",
     "secondsign.policy",
     "secondsign.rails",
 )
@@ -156,11 +163,14 @@ _SHARED_PREFIXES: Final[tuple[str, ...]] = (
     "secondsign.contracts",
     "secondsign.intent",
     "secondsign.isolation",
-    # The experimental, unfrozen on-chain vocabulary (ONCHAIN-S002). Frozen
-    # boundary models carrying no control-plane asset, like `contracts` — so it
-    # is shared, and its import closure is held free of the control plane by the
-    # shared-side contract in `pyproject.toml`. That no v1 module reaches it yet
-    # is a separate, stronger fact asserted in `tests/onchain/`.
+    # The experimental, unfrozen on-chain vocabulary and adapter (ONCHAIN-S002).
+    # Frozen boundary models carrying no control-plane asset, like `contracts` —
+    # so shared, with the import closure held free of the control plane by the
+    # shared-side contract in `pyproject.toml`. The deciding submodule
+    # `secondsign.onchain.policy` is the exception: it is control plane (above),
+    # matched by its narrower prefix before this blanket. That no v1 module
+    # reaches the package yet is a separate, stronger fact asserted in
+    # `tests/onchain/`.
     "secondsign.onchain",
 )
 

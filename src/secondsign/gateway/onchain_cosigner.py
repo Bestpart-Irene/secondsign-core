@@ -26,13 +26,14 @@ not is re-decide before consuming, because the first-cut policy is stateless —
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Any
+from typing import Any, Final
 
 from secondsign.approval import CheckerVerdict, MakerChecker, MakerIdentity, Rejected
-from secondsign.approval.maker_checker import PendingApproval
+from secondsign.approval.maker_checker import PendingApproval, RejectionReason
 from secondsign.contracts import Finding, ReasonCode
 from secondsign.decision import Decision, DecisionVerdict
 from secondsign.intent import IntentDigest, ProposalDigest
@@ -44,6 +45,21 @@ from secondsign.onchain.types import OnchainJudgement, OnchainVerdict
 #: another timezone, short enough that an unanswered approval dies. Mirrors the
 #: fiat gateway's ``REVIEW_TTL``.
 REVIEW_TTL: timedelta = timedelta(hours=4)
+
+#: A rejection that *settles* a held review, so it must leave the queue — a decline
+#: or an expiry. Mirrors the fiat gateway's ``_TERMINAL_REJECTIONS``: a malformed
+#: or self-approval answer is not terminal, and leaves the review answerable by a
+#: correct checker. Without this, a declined review stays live and a second checker
+#: can approve what the first refused (approver shopping).
+_TERMINAL_REJECTIONS: Final[frozenset[RejectionReason]] = frozenset(
+    {RejectionReason.not_approved, RejectionReason.expired}
+)
+
+#: A uint256 ceiling: ``value`` and ``nonce`` are ABI-encoded as ``uint256`` when
+#: the transaction hash is built, so anything at or above this is not a valid Safe
+#: transaction field and is refused before it reaches ``eth_abi`` (which would
+#: raise rather than return a clean refusal).
+_UINT256 = 1 << 256
 
 _DOMAIN_TYPEHASH_TEXT = "EIP712Domain(uint256 chainId,address verifyingContract)"
 _SAFE_TX_TYPEHASH_TEXT = (
@@ -64,6 +80,18 @@ def _load() -> tuple[Any, Any, Any]:
             "on-chain co-signing needs the optional dependency: pip install 'secondsign[onchain]'"
         ) from exc
     return keccak, encode, Account
+
+
+def _require_aware(now: datetime) -> None:
+    """Refuse a naive ``now`` at the boundary rather than deep inside the hold.
+
+    A naive datetime works on the DENY/ABSTAIN paths and only fails when a REVIEW
+    builds an ``AwareDatetime`` expiry, so a caller could ship it and crash on the
+    first review-band transaction. Failing here makes it a clear contract error on
+    every path, not a path-dependent one.
+    """
+    if now.tzinfo is None or now.tzinfo.utcoffset(now) is None:
+        raise ValueError("now must be timezone-aware")
 
 
 @dataclass(frozen=True)
@@ -185,6 +213,15 @@ class OnchainCosigner:
         self._review_ttl = review_ttl
         self._maker_checker = MakerChecker()
         self._pending: dict[str, _HeldReview] = {}
+        #: Approval ids whose review has already been granted and signed. A
+        #: re-proposal of an already-signed transaction must not be re-held under
+        #: the same (now burnt) id — that would be a review no checker can answer.
+        self._settled: set[str] = set()
+        #: Serialises the held-review lifecycle. The gateway serves on threads, so
+        #: hold/resolve must be atomic: two answers to one review racing through
+        #: get/consume/delete could otherwise both consume and the second deletion
+        #: raise. Mirrors ``AuthorizationService``'s lock.
+        self._lock = threading.Lock()
 
     @property
     def address(self) -> str:
@@ -207,7 +244,15 @@ class OnchainCosigner:
 
         ``proposer`` is the maker — the principal that proposed the transaction —
         recorded so a checker who later approves cannot be the same principal.
+        ``now`` must be timezone-aware, and ``nonce`` a uint256; a naive datetime
+        or an out-of-range field is a caller error, refused before any hashing.
         """
+        _require_aware(now)
+        # `value` is bounded by SafeCall; `nonce` is a bare parameter, so it is
+        # range-checked here — an out-of-range uint256 would raise inside eth_abi
+        # rather than return a clean refusal.
+        if not 0 <= nonce < _UINT256:
+            return CosignOutcome(status=CosignStatus.refused)
         judgement = self._judge(call)
         # Fail-closed at the signing boundary: ABSTAIN — the absence of any concern
         # — is the *only* state that signs, REVIEW holds for a human, and every
@@ -233,34 +278,77 @@ class OnchainCosigner:
         judgement: OnchainJudgement,
     ) -> CosignOutcome:
         approval_id = tx_hash.hex()
-        # The maker-checker binds an approval to a proposal digest; on-chain that
-        # digest *is* the transaction hash, so a checker approves this exact
-        # transaction and nothing else. A REVIEW `Decision` is what the shared
-        # maker-checker consumes, so the on-chain review is carried through one.
-        proposal = ProposalDigest(value=approval_id)
-        decision = Decision(
-            verdict=DecisionVerdict.REVIEW,
-            digest=IntentDigest(value=approval_id),
-            findings=(Finding(code=ReasonCode.value_band_exceeded),),
-        )
-        approval = self._maker_checker.request(
-            decision,
-            MakerIdentity(subject=proposer),
-            approval_id=approval_id,
-            proposal=proposal,
-            expires_at=now + self._review_ttl,
-        )
-        self._pending[approval_id] = _HeldReview(
-            tx_hash=tx_hash, approval=approval, judgement=judgement
-        )
-        return CosignOutcome(status=CosignStatus.held, judgement=judgement, approval_id=approval_id)
+        with self._lock:
+            if approval_id in self._settled:
+                # This exact transaction was already reviewed and signed. Its
+                # one-shot approval is burnt, so re-holding it would create a
+                # review no checker could ever answer — refuse instead.
+                return CosignOutcome(status=CosignStatus.refused, judgement=judgement)
+            existing = self._pending.get(approval_id)
+            if existing is not None:
+                # An identical proposal is already held. Return the live review
+                # unchanged rather than minting a new one — re-holding would reset
+                # the TTL (defeating the expiry bound) and rebind the maker (so the
+                # original proposer could then approve their own review).
+                return CosignOutcome(
+                    status=CosignStatus.held,
+                    judgement=existing.judgement,
+                    approval_id=approval_id,
+                )
+            # The maker-checker binds an approval to a proposal digest; on-chain
+            # that digest *is* the transaction hash, so a checker approves this
+            # exact transaction and nothing else. A REVIEW `Decision` is what the
+            # shared maker-checker consumes, so the review is carried through one.
+            # The checker-facing finding carries the observed amount and limit from
+            # the judgement, so the human sees the magnitude they are approving
+            # rather than a bare "value exceeded" sentence.
+            band_finding = judgement.findings[0] if judgement.findings else None
+            proposal = ProposalDigest(value=approval_id)
+            decision = Decision(
+                verdict=DecisionVerdict.REVIEW,
+                digest=IntentDigest(value=approval_id),
+                findings=(
+                    Finding(
+                        code=ReasonCode.value_band_exceeded,
+                        observed=None if band_finding is None else band_finding.observed,
+                        limit=None if band_finding is None else band_finding.limit,
+                    ),
+                ),
+            )
+            approval = self._maker_checker.request(
+                decision,
+                MakerIdentity(subject=proposer),
+                approval_id=approval_id,
+                proposal=proposal,
+                expires_at=now + self._review_ttl,
+            )
+            self._pending[approval_id] = _HeldReview(
+                tx_hash=tx_hash, approval=approval, judgement=judgement
+            )
+            return CosignOutcome(
+                status=CosignStatus.held, judgement=judgement, approval_id=approval_id
+            )
+
+    def open_reviews(self) -> tuple[PendingApproval, ...]:
+        """The reviews awaiting a checker — the approval channel's window onto them.
+
+        The control-plane approval channel enumerates held reviews through this to
+        render each :class:`PendingApproval` to a human; without it a REVIEW-band
+        transaction would sit invisible until its TTL killed it. Returns the same
+        objects a :meth:`resolve` will consume (B3).
+        """
+        with self._lock:
+            return tuple(held.approval for held in self._pending.values())
 
     def resolve(self, approval_id: str, verdict: CheckerVerdict, *, now: datetime) -> CosignOutcome:
         """A checker's answer to a held review.
 
         The one-shot answer is consumed — a self-approval, a replay, an expired or
         digest-mismatched answer is refused by the shared maker-checker — and only
-        an approval by a *different* principal yields the signature.
+        an approval by a *different* principal yields the signature. A **terminal**
+        rejection (a decline or an expiry) settles the review and evicts it, so a
+        second checker cannot approve what the first declined; a malformed or
+        self-approval answer leaves the review answerable by a correct one.
 
         A re-decision before consuming is deliberately absent while the policy is
         stateless: a held action re-judges to the same REVIEW, so it would change
@@ -268,12 +356,22 @@ class OnchainCosigner:
         action (a velocity window, as the fiat gateway has), re-decide-before-
         consume must return here, exactly as ``AuthorizationService.resolve`` does.
         """
-        held = self._pending.get(approval_id)
-        if held is None:
-            return CosignOutcome(status=CosignStatus.refused)
-        if isinstance(self._maker_checker.consume(held.approval, verdict, now=now), Rejected):
-            return CosignOutcome(status=CosignStatus.refused, judgement=held.judgement)
-        del self._pending[approval_id]
-        return CosignOutcome(
-            status=CosignStatus.signed, judgement=held.judgement, signature=self._sign(held.tx_hash)
-        )
+        _require_aware(now)
+        with self._lock:
+            held = self._pending.get(approval_id)
+            if held is None:
+                return CosignOutcome(status=CosignStatus.refused)
+            consumed = self._maker_checker.consume(held.approval, verdict, now=now)
+            if isinstance(consumed, Rejected):
+                if consumed.reason in _TERMINAL_REJECTIONS:
+                    # A decline or expiry settles the review; it must leave the
+                    # queue so it cannot be re-answered (approver shopping).
+                    del self._pending[approval_id]
+                return CosignOutcome(status=CosignStatus.refused, judgement=held.judgement)
+            del self._pending[approval_id]
+            self._settled.add(approval_id)
+            return CosignOutcome(
+                status=CosignStatus.signed,
+                judgement=held.judgement,
+                signature=self._sign(held.tx_hash),
+            )

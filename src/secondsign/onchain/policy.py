@@ -89,10 +89,25 @@ def evaluate(
     deliberately vouched for. A transfer is not gated this way — it is a bounded,
     one-time outflow.
     """
+    # Native value is judged before the calldata, on every kind: the first-cut
+    # model has no native-value dimension, so any value riding alongside the call
+    # is an effect outside the model and is refused rather than silently ignored
+    # while the calldata alone is judged (a bounded approve carrying 1000 ETH).
+    if effect.native_value > 0:
+        return _judge(
+            OnchainVerdict.DENY,
+            OnchainReasonCode.effect_outside_model,
+            observed=effect.native_value,
+        )
     if effect.kind is EffectKind.erc20_transfer:
         return _judge_amount(effect, approval_cap, review_above)
     if effect.kind is EffectKind.erc20_approval:
-        amount = effect.amount if effect.amount is not None else 0
+        # An amount the effect model could not determine is not zero — it is
+        # unknown, and an unknown magnitude on a value-moving call is refused
+        # rather than treated as a harmless zero (fail-closed on undecidable).
+        if effect.amount is None:
+            return _judge(OnchainVerdict.DENY, OnchainReasonCode.effect_outside_model)
+        amount = effect.amount
         # The cap is checked first, so an over-cap amount denies as such rather
         # than as a spender problem — the same ordering the fiat amount policy uses.
         if amount > approval_cap:
@@ -110,15 +125,24 @@ def evaluate(
             # controls how much and how often the allowance is drawn.
             return _judge(OnchainVerdict.DENY, OnchainReasonCode.counterparty_not_allowlisted)
         return _judge_amount(effect, approval_cap, review_above)
-    return _judge(OnchainVerdict.DENY, _REFUSALS[effect.kind])
+    # Any kind not handled above is refused. `.get` with an explicit DENY default
+    # keeps the docstring's fail-closed promise even if a future EffectKind lands
+    # without a refusal reason — an unmapped kind denies, it does not raise.
+    return _judge(
+        OnchainVerdict.DENY,
+        _REFUSALS.get(effect.kind, OnchainReasonCode.effect_outside_model),
+    )
 
 
 def _judge_amount(
     effect: OnchainEffect, approval_cap: int, review_above: int | None
 ) -> OnchainJudgement:
-    """The shared amount posture: over the cap denies, the review band holds, the
-    rest raises no concern."""
-    amount = effect.amount if effect.amount is not None else 0
+    """The shared amount posture: an undetermined amount denies, over the cap
+    denies, the review band holds, the rest raises no concern."""
+    if effect.amount is None:
+        # Unknown magnitude on a value-moving call — fail closed, do not read as 0.
+        return _judge(OnchainVerdict.DENY, OnchainReasonCode.effect_outside_model)
+    amount = effect.amount
     if amount > approval_cap:
         return _judge(
             OnchainVerdict.DENY,
