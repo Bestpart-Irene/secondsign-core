@@ -26,6 +26,7 @@ from secondsign.gateway.onchain_cosigner import (
     SafeContext,
     safe_transaction_hash,
 )
+from secondsign.gateway.signer import LocalSigner
 from secondsign.intent import ProposalDigest
 from secondsign.isolation import Side, classify
 from secondsign.onchain.chain_state import (
@@ -44,6 +45,12 @@ _GOLDEN_SPENDER = "0x3333333333333333333333333333333333333333"
 _GOLDEN_HASH = bytes.fromhex("bbdf078a1eee6cb2e877f7725ceeb6d0e83094367b6346787fe6fc273f662068")
 
 _KEY = b"\xa1" * 32
+
+
+def _signer() -> LocalSigner:
+    return LocalSigner(_KEY)
+
+
 _APPROVE = "0x095ea7b3"
 _PROPOSER = "agent-workload"
 _NOW = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
@@ -118,7 +125,7 @@ def _cosigner(
     audit_sink: InMemoryAuditSink | None = None,
 ) -> OnchainCosigner:
     return OnchainCosigner(
-        _KEY,
+        _signer(),
         _context(),
         approval_cap=approval_cap,
         reader=reader if reader is not None else _reader(),
@@ -179,6 +186,35 @@ def test_an_allowed_action_is_signed_and_the_signature_recovers_to_the_cosigner(
     # Signed against the chain nonce (0), so the hash is the golden one.
     signature = bytes.fromhex(outcome.signature.removeprefix("0x"))
     assert Account._recover_hash(_GOLDEN_HASH, signature=signature) == cosigner.address
+
+
+def test_the_cosigner_signs_only_through_the_provider_contract():
+    # ONCHAIN-S009: the co-signer holds no key — it signs through the SignerProvider
+    # it is handed. A provider that never touches eth_account drives it end to end,
+    # returning exactly that provider's signature. If the co-signer reintroduced a
+    # raw key it would not produce the provider's canned value.
+    canned = "0x" + "cd" * 65
+
+    class FakeKmsSigner:
+        @property
+        def address(self) -> str:
+            return "0x" + "ab" * 20
+
+        def sign_hash(self, tx_hash: bytes) -> str:
+            return canned
+
+    cosigner = OnchainCosigner(
+        FakeKmsSigner(),
+        _context(),
+        approval_cap=1_000,
+        reader=_reader(),
+        expected=_expected(),
+        approve_spender_allowlist=frozenset({_GOLDEN_SPENDER}),
+    )
+    outcome = cosigner.cosign(_approve_call(), proposer=_PROPOSER, now=_NOW)
+    assert outcome.status is CosignStatus.signed
+    assert outcome.signature == canned
+    assert cosigner.address == "0x" + "ab" * 20
 
 
 def test_an_unlimited_approval_is_refused_with_no_signature():
@@ -267,11 +303,11 @@ def test_an_out_of_range_native_value_is_rejected_at_the_wire():
 def test_a_cosigner_not_wired_to_verify_refuses_to_sign():
     # Fail-closed: without a reader and an attested config the co-signer cannot
     # confirm the account or token, so it refuses rather than trust the caller.
-    no_reader = OnchainCosigner(_KEY, _context(), approval_cap=1_000)
+    no_reader = OnchainCosigner(_signer(), _context(), approval_cap=1_000)
     assert no_reader.cosign(_approve_call(), proposer=_PROPOSER, now=_NOW).status is (
         CosignStatus.refused
     )
-    reader_only = OnchainCosigner(_KEY, _context(), approval_cap=1_000, reader=_reader())
+    reader_only = OnchainCosigner(_signer(), _context(), approval_cap=1_000, reader=_reader())
     assert reader_only.cosign(_approve_call(), proposer=_PROPOSER, now=_NOW).status is (
         CosignStatus.refused
     )
@@ -331,7 +367,7 @@ def test_construction_rejects_a_chain_id_disagreement():
 
     with pytest.raises(ValueError, match="chain_id"):
         OnchainCosigner(
-            _KEY,
+            _signer(),
             SafeContext(safe_address=_GOLDEN_SAFE, chain_id=1),
             approval_cap=1_000,
             reader=_reader(),
@@ -584,7 +620,7 @@ def test_a_review_signed_after_approval_is_recorded():
 def test_a_cosigner_not_wired_to_verify_writes_no_receipt():
     # An unwired co-signer refuses before any judgement — nothing to record.
     sink = InMemoryAuditSink()
-    OnchainCosigner(_KEY, _context(), approval_cap=1_000, audit_sink=sink).cosign(
+    OnchainCosigner(_signer(), _context(), approval_cap=1_000, audit_sink=sink).cosign(
         _approve_call(), proposer=_PROPOSER, now=_NOW
     )
     assert sink.entries() == ()

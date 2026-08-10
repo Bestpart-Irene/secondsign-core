@@ -13,7 +13,7 @@ it, or when a complete slice depends on it. It is **ready** when every
 dependency is complete and it is not. It is **blocked** otherwise. ⚑ marks a
 slice that stops for a human before it is marked done.
 
-## Ready to pick up (5)
+## Ready to pick up (6)
 
 | Slice | Title | Waiting on |
 |---|---|---|
@@ -22,6 +22,7 @@ slice that stops for a human before it is marked done.
 | `ONCHAIN-S005` ⚑ | The constitutional double guard — four invariants held on both execution paths | — |
 | `ONCHAIN-S006` | Effect by simulation — the decided effect read from execution, not from calldata | — |
 | `ONCHAIN-S007` ⚑ | Re-verify the chain before signing, and pin the token identity | — |
+| `ONCHAIN-S009` ⚑ | The signing key is a SignerProvider contract, not a raw key | — |
 
 ## Blocked (0)
 
