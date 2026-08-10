@@ -64,7 +64,9 @@ def test_the_hash_matches_the_real_safe_getTransactionHash():
 
 def test_an_allowed_action_is_signed_and_the_signature_recovers_to_the_cosigner():
     context = SafeContext(safe_address=_GOLDEN_SAFE, chain_id=_GOLDEN_CHAIN)
-    cosigner = OnchainCosigner(_KEY, context, approval_cap=1_000)
+    cosigner = OnchainCosigner(
+        _KEY, context, approval_cap=1_000, approve_spender_allowlist=frozenset({_GOLDEN_SPENDER})
+    )
     call = SafeCall(
         to=_GOLDEN_TO,
         value=0,
@@ -120,7 +122,13 @@ def test_ethereum_crypto_is_an_optional_dependency_not_a_runtime_one():
 
 
 def _review_cosigner() -> OnchainCosigner:
-    return OnchainCosigner(_KEY, _context(), approval_cap=1_000, review_above=100)
+    return OnchainCosigner(
+        _KEY,
+        _context(),
+        approval_cap=1_000,
+        review_above=100,
+        approve_spender_allowlist=frozenset({_GOLDEN_SPENDER}),
+    )
 
 
 def _review_call() -> SafeCall:
@@ -193,3 +201,42 @@ def test_an_unknown_approval_is_refused_with_no_judgement():
     resolved = _review_cosigner().resolve(unknown, _checker_verdict(unknown), now=_NOW)
     assert resolved.status is CosignStatus.refused
     assert resolved.judgement is None
+
+
+def test_a_bounded_approval_to_an_unlisted_spender_is_not_silently_signed():
+    # The review's drain path: approve(attacker, cap-1) is bounded, so the
+    # amount rules alone raise no concern — and a signature hands the attacker
+    # a live allowance to pull with transferFrom, repeatable every nonce.
+    cosigner = OnchainCosigner(_KEY, _context(), approval_cap=1_000)
+    attacker = "0x4444444444444444444444444444444444444444"
+    call = SafeCall(
+        to=_GOLDEN_TO,
+        value=0,
+        data=_approve_data(attacker, 999),
+        operation=SafeOperation.call,
+    )
+    outcome = cosigner.cosign(call, nonce=0, proposer=_PROPOSER, now=_NOW)
+    assert outcome.status is not CosignStatus.signed
+    assert outcome.signature is None
+
+
+def test_a_verdict_the_cosigner_does_not_recognise_refuses_rather_than_signs(monkeypatch):
+    # Silence is the only state that signs. A verdict outside the vocabulary —
+    # a future addition, a bug — must refuse, not fall through to a signature.
+    from types import SimpleNamespace
+
+    from secondsign.gateway import onchain_cosigner as module
+
+    cosigner = OnchainCosigner(_KEY, _context(), approval_cap=1_000)
+    monkeypatch.setattr(
+        module.policy, "evaluate", lambda *args, **kwargs: SimpleNamespace(verdict=object())
+    )
+    call = SafeCall(
+        to=_GOLDEN_TO,
+        value=0,
+        data=_approve_data(_GOLDEN_SPENDER, 100),
+        operation=SafeOperation.call,
+    )
+    outcome = cosigner.cosign(call, nonce=0, proposer=_PROPOSER, now=_NOW)
+    assert outcome.status is CosignStatus.refused
+    assert outcome.signature is None

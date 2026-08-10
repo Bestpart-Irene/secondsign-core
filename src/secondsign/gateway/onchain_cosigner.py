@@ -172,6 +172,7 @@ class OnchainCosigner:
         *,
         approval_cap: int,
         review_above: int | None = None,
+        approve_spender_allowlist: frozenset[str] = frozenset(),
         review_ttl: timedelta = REVIEW_TTL,
     ) -> None:
         _, _, account_cls = _load()
@@ -180,6 +181,7 @@ class OnchainCosigner:
         self._adapter = SafeAdapter(context.safe_address)
         self._approval_cap = approval_cap
         self._review_above = review_above
+        self._approve_spender_allowlist = approve_spender_allowlist
         self._review_ttl = review_ttl
         self._maker_checker = MakerChecker()
         self._pending: dict[str, _HeldReview] = {}
@@ -194,6 +196,7 @@ class OnchainCosigner:
             self._adapter.decode(call),
             approval_cap=self._approval_cap,
             review_above=self._review_above,
+            approve_spender_allowlist=self._approve_spender_allowlist,
         )
 
     def _sign(self, tx_hash: bytes) -> str:
@@ -206,14 +209,21 @@ class OnchainCosigner:
         recorded so a checker who later approves cannot be the same principal.
         """
         judgement = self._judge(call)
-        if judgement.verdict is OnchainVerdict.DENY:
-            return CosignOutcome(status=CosignStatus.refused, judgement=judgement)
-        tx_hash = safe_transaction_hash(call, self._context, nonce)
+        # Fail-closed at the signing boundary: ABSTAIN — the absence of any concern
+        # — is the *only* state that signs, REVIEW holds for a human, and every
+        # other verdict (DENY, or anything the vocabulary gains later) refuses.
+        # Signing on "not DENY" would treat silence as consent and hand a
+        # signature to any effect a first-cut policy has not yet learned to name.
         if judgement.verdict is OnchainVerdict.REVIEW:
-            return self._hold(tx_hash, proposer, now, judgement)
-        return CosignOutcome(
-            status=CosignStatus.signed, judgement=judgement, signature=self._sign(tx_hash)
-        )
+            return self._hold(
+                safe_transaction_hash(call, self._context, nonce), proposer, now, judgement
+            )
+        if judgement.verdict is OnchainVerdict.ABSTAIN:
+            tx_hash = safe_transaction_hash(call, self._context, nonce)
+            return CosignOutcome(
+                status=CosignStatus.signed, judgement=judgement, signature=self._sign(tx_hash)
+            )
+        return CosignOutcome(status=CosignStatus.refused, judgement=judgement)
 
     def _hold(
         self,

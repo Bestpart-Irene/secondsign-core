@@ -8,15 +8,53 @@ from secondsign.onchain.types import OnchainReasonCode, OnchainVerdict
 
 _TOKEN = "0x" + "22" * 20
 _SPENDER = "0x" + "33" * 20
+_ATTACKER = "0x" + "44" * 20
 _CAP = 1_000
+#: The spender the approval tests vouch for. An approval is fail-closed without it.
+_ALLOWED = frozenset({_SPENDER})
 
 
-def _effect(kind: EffectKind, amount: int | None = None) -> OnchainEffect:
-    return OnchainEffect(kind=kind, target=_TOKEN, counterparty=_SPENDER, amount=amount)
+def _effect(
+    kind: EffectKind, amount: int | None = None, counterparty: str = _SPENDER
+) -> OnchainEffect:
+    return OnchainEffect(kind=kind, target=_TOKEN, counterparty=counterparty, amount=amount)
 
 
-def test_a_bounded_approval_raises_no_concern():
+def test_a_bounded_approval_to_an_allowlisted_spender_raises_no_concern():
+    judgement = policy.evaluate(
+        _effect(EffectKind.erc20_approval, 100),
+        approval_cap=_CAP,
+        approve_spender_allowlist=_ALLOWED,
+    )
+    assert judgement.verdict is OnchainVerdict.ABSTAIN
+
+
+def test_a_bounded_approval_to_an_unlisted_spender_is_denied():
+    # The drain path: 999 < cap, so the amount alone raises no concern — but the
+    # spender is not vouched for, and an allowance is a standing draw capability.
+    judgement = policy.evaluate(
+        _effect(EffectKind.erc20_approval, 999, counterparty=_ATTACKER),
+        approval_cap=_CAP,
+        approve_spender_allowlist=_ALLOWED,
+    )
+    assert judgement.verdict is OnchainVerdict.DENY
+    assert judgement.reasons == (OnchainReasonCode.counterparty_not_allowlisted,)
+
+
+def test_an_approval_is_fail_closed_when_no_spender_is_allowlisted():
+    # The default: an empty allowlist denies every approval, vouched or not.
     judgement = policy.evaluate(_effect(EffectKind.erc20_approval, 100), approval_cap=_CAP)
+    assert judgement.verdict is OnchainVerdict.DENY
+    assert judgement.reasons == (OnchainReasonCode.counterparty_not_allowlisted,)
+
+
+def test_a_bounded_transfer_is_not_gated_by_the_approval_allowlist():
+    # A transfer is a one-time bounded outflow, not a standing capability, so the
+    # spender allowlist does not apply — an arbitrary recipient under the cap is
+    # allowed (the gateway's velocity window bounds repetition).
+    judgement = policy.evaluate(
+        _effect(EffectKind.erc20_transfer, 100, counterparty=_ATTACKER), approval_cap=_CAP
+    )
     assert judgement.verdict is OnchainVerdict.ABSTAIN
 
 
@@ -57,13 +95,20 @@ def test_an_unrecognised_call_is_denied():
 
 
 def test_an_approval_with_no_amount_is_treated_as_zero_and_allowed():
-    judgement = policy.evaluate(_effect(EffectKind.erc20_approval, None), approval_cap=_CAP)
+    judgement = policy.evaluate(
+        _effect(EffectKind.erc20_approval, None),
+        approval_cap=_CAP,
+        approve_spender_allowlist=_ALLOWED,
+    )
     assert judgement.verdict is OnchainVerdict.ABSTAIN
 
 
 def test_an_amount_in_the_review_band_is_held_for_a_human():
     judgement = policy.evaluate(
-        _effect(EffectKind.erc20_approval, 500), approval_cap=_CAP, review_above=100
+        _effect(EffectKind.erc20_approval, 500),
+        approval_cap=_CAP,
+        review_above=100,
+        approve_spender_allowlist=_ALLOWED,
     )
     assert judgement.verdict is OnchainVerdict.REVIEW
     (finding,) = judgement.findings
@@ -73,7 +118,10 @@ def test_an_amount_in_the_review_band_is_held_for_a_human():
 
 def test_below_the_review_threshold_raises_no_concern():
     judgement = policy.evaluate(
-        _effect(EffectKind.erc20_approval, 100), approval_cap=_CAP, review_above=100
+        _effect(EffectKind.erc20_approval, 100),
+        approval_cap=_CAP,
+        review_above=100,
+        approve_spender_allowlist=_ALLOWED,
     )
     assert judgement.verdict is OnchainVerdict.ABSTAIN  # exactly the threshold is not yet a review
 
