@@ -18,19 +18,18 @@ slice that stops for a human before it is marked done.
 | Slice | Title | Waiting on |
 |---|---|---|
 | `CORE-S018` ⚑ | Extension health and a declared degraded state | — |
-| `ONCHAIN-S001` ⚑ | Falsify or confirm the double-guard topology on a local chain | — |
 | `ONCHAIN-S002` | Candidate on-chain verdict types behind an unfrozen version constant | — |
+| `ONCHAIN-S005` ⚑ | The constitutional double guard — four invariants held on both execution paths | — |
 
-## Blocked (4)
+## Blocked (3)
 
 | Slice | Title | Waiting on |
 |---|---|---|
 | `ONCHAIN-S003` ⚑ | Generalise the strictness algebra in a private kernel without moving the public surface | ONCHAIN-S002 |
 | `ONCHAIN-S004` ⚑ | The co-signer path — SecondSign signs a Safe transaction only when the engine allows | ONCHAIN-S002 |
-| `ONCHAIN-S005` ⚑ | The constitutional double guard — four invariants held on both execution paths | ONCHAIN-S001 |
 | `ONCHAIN-S006` | Effect by simulation — the decided effect read from execution, not from calldata | ONCHAIN-S004 |
 
-## Complete (23)
+## Complete (24)
 
 | Slice | Title | Waiting on |
 |---|---|---|
@@ -57,6 +56,7 @@ slice that stops for a human before it is marked done.
 | `CORE-S022` ⚑ | Carry a REVIEW verdict to a human and back, and execute what was approved | — |
 | `CORE-S023` ⚑ | The approver's channel — a second mTLS listener the agent has no route to | — |
 | `CORE-S024` ⚑ | A shared module may not reach the control plane | — |
+| `ONCHAIN-S001` ⚑ | Falsify or confirm the double-guard topology on a local chain | — |
 
 ---
 
