@@ -47,16 +47,16 @@ dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "ruff==0.16.0",
-    "hypothesis==6.163.0",
+    "hypothesis==6.165.2",
     "import-linter==2.13",
     "mypy==2.3.0",
     "pyyaml==6.0.3",
-    "stripe==15.3.1",
+    "stripe==15.4.0",
     # Generates the reference deployment's ephemeral PKI. Development only — it
     # is not a runtime dependency and must never become one; `[project]` keeps
     # exactly one, and the licence gate inspects the built wheel rather than the
     # CI environment precisely so this distinction stays real.
-    "cryptography==49.0.0",
+    "cryptography==50.0.0",
     # `tests/packaging/test_sdist.py` builds a real source distribution rather
     # than reading the include list, because the list is not the artefact. Both
     # are dev dependencies so the build runs with `--no-isolation`: a test that
