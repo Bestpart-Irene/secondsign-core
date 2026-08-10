@@ -1050,3 +1050,42 @@ slices:
       reader is a protocol so core stays deterministic and network-free (the
       SignerProvider-style boundary): the live Base RPC implementation is the
       deployment's, and core ships only the contract and a test double.
+
+  - id: ONCHAIN-S009
+    title: The signing key is a SignerProvider contract, not a raw key
+    depends_on: [ONCHAIN-S004]
+    threats: [C11]
+    scope:
+      - src/secondsign/onchain/**
+      - src/secondsign/gateway/**
+      - tests/onchain/**
+      - tests/gateway/**
+      - docs/**
+    forbidden:
+      - a KMS or HSM client, or any key material, in core
+      - a SignerProvider whose contract exposes or can export the private key
+      - the co-signer reconstructing or holding the raw private key itself
+      - making an Ethereum signing library a non-optional runtime dependency of core
+    acceptance:
+      - the co-signer takes a SignerProvider, never private_key bytes; it signs through the contract and reads the signer address through it
+      - core ships a LocalSigner reference implementation; a SignerProvider that does not use eth_account at all can drive the co-signer, so the KMS/HSM implementation can live in the enterprise plane
+      - the contract exposes a signature over a hash and the signer address, and nothing that yields the key
+      - eth_account stays an optional dependency; importing core pulls in no crypto, and a fresh-venv import needs no signing library
+    required_tests: [unit, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+    stop_for_human: true
+    checkpoint_reason: >
+      This changes how the signing key is held at the boundary — from a raw key
+      the co-signer reconstructs to a provider contract behind which a KMS or HSM
+      sits. A human confirms the key cannot be exported through the contract, that
+      the co-signer no longer holds raw key material, and that the enterprise KMS
+      implementation is not pulled into core, before real keys depend on it.
+    rationale: >
+      A raw private_key in application configuration or logs is not a production
+      key form (C11). The signing capability must sit behind a provider so the key
+      lives in a KMS/HSM, can be rotated and versioned, and can never be exported —
+      while core keeps its no-crypto-at-runtime discipline. The protocol is public
+      (a self-hoster can implement it and verify the behaviour); the KMS
+      implementation and key lifecycle are the enterprise plane's. This is the
+      code expression of "the security kernel is open, the managed control plane
+      is the product."
