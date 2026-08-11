@@ -140,7 +140,7 @@ testpaths = ["tests", "examples"]
 # is missing. Deselected-by-default and skipped-when-unavailable are different
 # things: the first is a choice about which gate you are running, the second is a
 # gate reporting green having verified nothing.
-addopts = "-q -m 'not deployment and not deployment_mutation'"
+addopts = "-q -m 'not deployment and not deployment_mutation and not onchain_live'"
 markers = [
     "deployment: runs against the containerised reference deployment (CORE-S019)",
     # Its own marker rather than a second `deployment` case, because it stands up
@@ -148,6 +148,11 @@ markers = [
     # deployment gate is one. `-m deployment` must not pick it up, and neither
     # must the default run.
     "deployment_mutation: requires the deployment gate to fail against a joined topology (CORE-S019)",
+    # A live on-chain integration test (ONCHAIN-S008): it deploys a real Safe on a
+    # local Anvil and reads it. Deselected by default and skipped when the Foundry
+    # tooling (anvil/forge/cast) is absent — the reader's logic is covered by the
+    # mocked unit tests in the default gate, so the default run needs no chain.
+    "onchain_live: runs the live ChainStateReader against a local Anvil (ONCHAIN-S008)",
 ]
 
 [tool.coverage.run]
