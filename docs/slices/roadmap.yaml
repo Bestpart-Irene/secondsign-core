@@ -1089,3 +1089,35 @@ slices:
       implementation and key lifecycle are the enterprise plane's. This is the
       code expression of "the security kernel is open, the managed control plane
       is the product."
+
+  - id: ONCHAIN-S008
+    title: A live cast-backed ChainStateReader for the co-signer
+    depends_on: [ONCHAIN-S007]
+    threats: [C4]
+    scope:
+      - deploy/**
+      - tests/deployment/**
+      - docs/**
+      - pyproject.toml
+    forbidden:
+      - an RPC client, a network call, a subprocess, or an RPC secret in src/secondsign/**
+      - resolving a proxy's implementation by a guessed slot rather than a configured one
+      - a live integration test that fails the default gate when the chain tooling is absent (it must skip; the logic is covered by the mocked unit tests)
+    acceptance:
+      - a reader in deploy/ implements the ONCHAIN-S007 ChainStateReader protocol, reading a Safe's nonce, owners, threshold, both guard slots, chain id and version, and resolving a token proxy's implementation and code hash
+      - it reads through the chain tooling only; core takes on no RPC dependency and the decision over the read state stays deterministic
+      - the reader's parsing and logic are covered by unit tests that mock the tooling, in the default gate
+      - a live integration test deploys a real Safe on a local chain and proves the reader produces a SafeChainState/TokenIdentity the co-signer accepts, and that a divergence from an attested ExpectedSafeConfig is detected; it skips when the chain tooling is unavailable
+    required_tests: [unit]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+    stop_for_human: false
+    rationale: >
+      ONCHAIN-S007 shipped the ChainStateReader protocol and a deterministic
+      double; this is the live implementation the deployment uses, reading a real
+      Safe and resolving the pinned token's implementation and code hash (C4).
+      It lives in deploy/ — never in core — so core keeps its no-RPC,
+      deterministic-kernel discipline (ADR 0001/0006): the decision is a pure
+      function of the read state, and the reading is the deployment's. It is
+      cast-backed (the Foundry tooling the on-chain workspace already requires),
+      so it needs no Python RPC dependency. A true Base fork additionally needs a
+      Base RPC endpoint the deployment supplies.
