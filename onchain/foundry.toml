@@ -1,8 +1,7 @@
-# The on-chain verification workspace.
-#
-# This workspace exists to answer questions about external contracts, not to
-# ship any. `src/` stays empty until a slice that produces a production guard
-# says otherwise; ONCHAIN-S001 writes tests only.
+# The on-chain workspace: it began as a verification harness for external
+# contracts and now also ships SecondSign's own. `src/` was empty until
+# ONCHAIN-S001 (which writes tests only); ONCHAIN-S005 lifted that and added the
+# production double guard under `src/` (ADR 0008).
 #
 # Both Safe releases are remapped side by side on purpose: the topology
 # falsification has to reproduce the 1.4.1 behaviour and the 1.5.0 behaviour in
