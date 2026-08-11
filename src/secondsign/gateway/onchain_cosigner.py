@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """The on-chain co-signer — SecondSign's decision as a Safe co-signature.
 
-Control-plane. It holds the SecondSign signing key, which the managed agent never
-reaches (the on-chain analogue of the rail credential; INV-12, enforced by this
-module living on the control-plane side of the boundary). Given a proposed Safe
+Control-plane. It holds the SecondSign signing *capability* — a ``SignerProvider``
+(ADR 0007), never a raw key — which the managed agent never reaches (the on-chain
+analogue of the rail credential; INV-12, enforced by this module living on the
+control-plane side of the boundary). Given a proposed Safe
 transaction it decodes the effect, judges it, and — only when no concern is raised
 — signs the transaction's hash. The signature binds the *exact* transaction (the
 same digest-binding as the fiat proposal, ADR 0005 / INV-9): a Safe 2-of-2 in
@@ -37,6 +38,7 @@ from secondsign.approval.maker_checker import PendingApproval, RejectionReason
 from secondsign.audit import AuditLog, AuditSink, InMemoryAuditSink
 from secondsign.contracts import Finding, ReasonCode
 from secondsign.decision import Decision, DecisionVerdict
+from secondsign.gateway.signer import SignerProvider
 from secondsign.intent import IntentDigest, ProposalDigest
 from secondsign.onchain import policy
 from secondsign.onchain.chain_state import ChainStateReader, ExpectedSafeConfig
@@ -79,17 +81,17 @@ _SAFE_TX_TYPEHASH_TEXT = (
 _ZERO_ADDRESS = "0x" + "00" * 20
 
 
-def _load() -> tuple[Any, Any, Any]:
-    """The optional Ethereum crypto, or a clear message pointing at the extra."""
+def _load() -> tuple[Any, Any]:
+    """The optional hashing/encoding for the transaction hash. Signing itself is
+    the SignerProvider's — the co-signer needs no ``eth_account`` of its own."""
     try:
         from eth_abi import encode
-        from eth_account import Account
         from eth_utils import keccak
     except ImportError as exc:  # pragma: no cover - the message is asserted, not the import failure
         raise RuntimeError(
             "on-chain co-signing needs the optional dependency: pip install 'secondsign[onchain]'"
         ) from exc
-    return keccak, encode, Account
+    return keccak, encode
 
 
 def _require_aware(now: datetime) -> None:
@@ -120,7 +122,7 @@ def safe_transaction_hash(call: SafeCall, context: SafeContext, nonce: int) -> b
     gas parameters are zero: a decision co-signature authorises the action, it does
     not price a relayer refund.
     """
-    keccak, encode, _ = _load()
+    keccak, encode = _load()
     operation = 0 if call.operation is SafeOperation.call else 1
     data = bytes.fromhex(call.data.removeprefix("0x"))
     domain = keccak(
@@ -218,7 +220,7 @@ class OnchainCosigner:
 
     def __init__(
         self,
-        private_key: bytes,
+        signer: SignerProvider,
         context: SafeContext,
         *,
         approval_cap: int,
@@ -234,8 +236,9 @@ class OnchainCosigner:
             # attests to the expected one. If they disagree the co-signer would
             # verify against one chain and sign for another — a config error.
             raise ValueError("context.chain_id and expected.chain_id must agree")
-        _, _, account_cls = _load()
-        self._account = account_cls.from_key(private_key)
+        # The signing capability is a provider contract, never a raw key: the
+        # co-signer signs through it and holds no key material (ADR 0007).
+        self._signer = signer
         self._context = context
         self._adapter = SafeAdapter(context.safe_address)
         self._approval_cap = approval_cap
@@ -273,7 +276,7 @@ class OnchainCosigner:
     @property
     def address(self) -> str:
         """The Safe owner address SecondSign co-signs as."""
-        return str(self._account.address)
+        return self._signer.address
 
     def _judge(self, call: SafeCall) -> OnchainJudgement:
         return policy.evaluate(
@@ -298,7 +301,7 @@ class OnchainCosigner:
         return state.nonce, self._expected.mismatches(state, token)
 
     def _sign(self, tx_hash: bytes) -> str:
-        return "0x" + self._account.unsafe_sign_hash(tx_hash).signature.hex()
+        return self._signer.sign_hash(tx_hash)
 
     def _record(
         self, tx_hash: bytes, verdict: OnchainVerdict, *, approval_id: str | None = None
