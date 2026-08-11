@@ -73,6 +73,7 @@ def evaluate(
     approval_cap: int,
     review_above: int | None = None,
     approve_spender_allowlist: frozenset[str] = frozenset(),
+    token_allowlist: frozenset[str] = frozenset(),
 ) -> OnchainJudgement:
     """Judge a decoded effect against a per-transaction token cap.
 
@@ -81,6 +82,14 @@ def evaluate(
     (and up to the cap) an amount is held for a human (REVIEW); above the cap, or
     unmapped, it is denied (fail-closed). ``review_above`` is optional and, if
     given, must be below ``approval_cap`` for the band to be reachable.
+
+    A token operation is judged only against a **pinned token**: a ``transfer`` or
+    ``approve`` whose target is not in ``token_allowlist`` is denied, because an
+    unitless cap says nothing about which asset it bounds (C1) and a look-alike or
+    unknown token is not the one that was attested. The allowlist defaults empty,
+    so token operations are fail-closed until an asset is pinned. Address is the
+    static half of token identity; the co-signer re-verifies the pinned token's
+    resolved implementation and code hash against chain before signing (C4).
 
     An approval carries the extra spender check: even a bounded approval to a
     spender not in ``approve_spender_allowlist`` is denied, because the allowance
@@ -99,6 +108,12 @@ def evaluate(
             OnchainReasonCode.effect_outside_model,
             observed=effect.native_value,
         )
+    if effect.kind is EffectKind.erc20_transfer or effect.kind is EffectKind.erc20_approval:
+        # The token identity gate, before amount or spender: an unpinned asset is
+        # refused without needing the cap to say anything about it.
+        pinned = {token.lower() for token in token_allowlist}
+        if effect.target.lower() not in pinned:
+            return _judge(OnchainVerdict.DENY, OnchainReasonCode.token_not_allowlisted)
     if effect.kind is EffectKind.erc20_transfer:
         return _judge_amount(effect, approval_cap, review_above)
     if effect.kind is EffectKind.erc20_approval:

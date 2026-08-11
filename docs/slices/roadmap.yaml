@@ -1006,3 +1006,47 @@ slices:
       (undecidable semantics deny; a closed effect model) and C6 (a simulation
       validity envelope). It replaces the static-decode body landed in the adapter
       while keeping OnchainEffect, the type the policies judge, stable.
+
+  - id: ONCHAIN-S007
+    title: Re-verify the chain before signing, and pin the token identity
+    depends_on: [ONCHAIN-S004]
+    threats: [C1, C4]
+    scope:
+      - src/secondsign/onchain/**
+      - src/secondsign/gateway/**
+      - tests/onchain/**
+      - tests/gateway/**
+      - docs/**
+    forbidden:
+      - a live RPC client, a network call, or an RPC secret in core — the reader is a protocol, its live implementation lives in the deployment
+      - trusting the caller-supplied nonce, Safe configuration, or token identity instead of reading them from chain
+      - binding only a proxy's own code hash — a proxy needs its resolved implementation and that implementation's code hash (C4)
+      - a co-signer that signs when no chain reader or attested configuration is wired (fail-open); absence must refuse
+      - a token cap that is not denominated against a pinned token identity
+    acceptance:
+      - the co-signer reads the Safe's live state (nonce, owners, threshold, both guards, chain id, Safe version) through an injected ChainStateReader and signs against the chain nonce, never the caller's
+      - any drift of the live Safe configuration from the attested ExpectedSafeConfig refuses rather than signs, and the refusal is recorded
+      - the token is pinned to one identity (address plus resolved implementation and its code hash); a different token, or the pinned token's implementation drifting, refuses
+      - re-verification runs before every signature, on both the direct-sign path and the review-resolve path; a held review whose chain nonce has advanced is stale and refuses
+      - a co-signer constructed without a reader and an ExpectedSafeConfig refuses to sign — fail-closed, not a silent trust of the caller
+      - the reader is a protocol with a deterministic in-core reference double; core takes on no network or RPC dependency, and the decision stays a pure function of the read state
+    required_tests: [unit, architecture]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+    stop_for_human: true
+    checkpoint_reason: >
+      This reworks the precondition of the signing boundary: the co-signer now
+      refuses unless the live chain matches an attested configuration, and pins the
+      token identity. A human confirms the re-verification is fail-closed (no
+      reader → refuse), that drift and a stale held nonce refuse, and that core
+      took on no live-RPC dependency, before value depends on it.
+    rationale: >
+      The co-signer today trusts the caller's nonce and judges an unpinned,
+      unitless cap — so a lying agent could hand a stale nonce, and the cap does
+      not know which token it bounds. C4 (the code can change after the decision)
+      requires every dependency re-read before signing and any mismatch refused;
+      because canonical USDC is a proxy, the identity bound is the resolved
+      implementation and its code hash, not the proxy's own. C1 (future exposure)
+      requires the token pinned so an approval cannot target a look-alike. The
+      reader is a protocol so core stays deterministic and network-free (the
+      SignerProvider-style boundary): the live Base RPC implementation is the
+      deployment's, and core ships only the contract and a test double.
