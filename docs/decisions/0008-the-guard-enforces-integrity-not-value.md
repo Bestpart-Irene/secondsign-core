@@ -67,19 +67,28 @@ enforced, not assumed empty.
 
 - **Transaction path (the agent's `execTransaction`):** every account-control
   change is refused, including owner changes. The agent reconfigures nothing.
+- **Transaction path (the agent's `execTransaction`):** every account-control
+  change is refused, including all three owner operations. The agent
+  reconfigures nothing.
 - **Module path (`checkModuleTransaction`):** the *subverting* changes are refused
   — `setGuard`, `setModuleGuard`, `changeThreshold`, `enableModule`,
-  `disableModule`, `setFallbackHandler`, and `delegatecall` — but **owner changes
-  are allowed.** This is the recovery capability: a lost SecondSign key is replaced
-  by a `swapOwner` down the module path, which the agent's path forbids.
+  `disableModule`, `setFallbackHandler`, and `delegatecall` — and so are
+  `addOwnerWithThreshold` and `removeOwner`, **because each carries a `_threshold`
+  argument and would let a module change the threshold, breaching invariant 2 on
+  the module path.** The one owner operation the module path permits is
+  **`swapOwner`**: it rotates a signer without touching the owner count or the
+  threshold, so the 2-of-2 arrangement is preserved bit-for-bit while a lost
+  SecondSign key is replaced. That, and only that, is the recovery capability, and
+  the agent's transaction path forbids even it.
 
 Invariant 1 ("remove SecondSign") is therefore enforced against the *agent* on the
-transaction path; the module path leaves owner changes open **as a capability**.
-What makes that capability safe — that only an approved, unexpired recovery may use
-it — is the `RecoveryController`'s allowlist and timelock (a later slice, §3.11);
-v1 runs zero enabled modules as defence in depth until then. The guard is
-capability-based, not identity-based: it forbids the dangerous capabilities on both
-paths and permits owner-recovery on the module path.
+transaction path; the module path leaves the single threshold-preserving rotation
+(`swapOwner`) open **as a capability**. What makes that capability safe — that only
+an approved, unexpired recovery may use it — is the `RecoveryController`'s allowlist
+and timelock (a later slice, §3.11); v1 runs zero enabled modules as defence in
+depth until then. The guard is capability-based, not identity-based: it forbids the
+dangerous capabilities on both paths and permits exactly the threshold-preserving
+owner rotation on the module path.
 
 ### 4. Proven by refused execution, not by reading
 
@@ -108,10 +117,12 @@ integrity floor, not a second policy.
 **One guard.** Simpler, and `ONCHAIN-S001` proved it leaves the module path a
 silent bypass. Rejected: both hooks.
 
-**Refuse owner changes on the module path too.** Maximally strict, and it makes
+**Refuse `swapOwner` on the module path too.** Maximally strict, and it makes
 key-loss recovery impossible — the account is bricked the day SecondSign's key is
-lost. Rejected: owner-recovery is the module path's reason to exist; the allowlist
-and timelock that bound it are the RecoveryController's job.
+lost. Rejected: the threshold-preserving owner rotation is the module path's reason
+to exist; the allowlist and timelock that bound it are the RecoveryController's job.
+(`addOwnerWithThreshold` and `removeOwner` stay refused on both paths — they carry a
+threshold change, so permitting them would reopen invariant 2.)
 
 ## Consequences
 
