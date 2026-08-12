@@ -1121,3 +1121,41 @@ slices:
       cast-backed (the Foundry tooling the on-chain workspace already requires),
       so it needs no Python RPC dependency. A true Base fork additionally needs a
       Base RPC endpoint the deployment supplies.
+
+  - id: ONCHAIN-S010
+    title: The recovery controller — a bounded, timelocked user of the swapOwner capability
+    depends_on: [ONCHAIN-S005]
+    threats: [C3, C11]
+    scope:
+      - onchain/src/**
+      - onchain/test/**
+      - docs/**
+    forbidden:
+      - a path through the controller to any account-control operation other than swapOwner (no setGuard, setModuleGuard, changeThreshold, addOwnerWithThreshold, removeOwner, enableModule, disableModule, setFallbackHandler or delegatecall)
+      - an initiator other than the single configured recovery address opening or executing a recovery, or admitting a class of caller rather than a specific pending record
+      - execution before the timelock elapses, or a pending recovery the account's own authority cannot veto during the delay
+      - copying expression from Safe's contracts or tests into the controller
+      - a bound asserted by reading the source rather than by an executed transaction
+    acceptance:
+      - the controller, enabled as the sole module, rotates exactly one owner (swapOwner) and only after the configured timelock, and only when the single configured recovery address opened it — each proven by executed transactions
+      - executeRecovery before readyAt is refused; after readyAt the swapOwner executes through the ADR-0008 module guard, and the owner count and threshold are unchanged
+      - the account's own authority (execTransaction) can cancel a pending recovery during the delay, and a cleared or executed request cannot be replayed
+      - no path through the controller reaches any account-control operation other than swapOwner, and an initiator other than the configured recovery address cannot open or execute a recovery
+    required_tests: [onchain_topology]
+    gates: [ruff_check, ruff_format, forge_fmt, forge_test, validate_slices]
+    stop_for_human: true
+    checkpoint_reason: >
+      The recovery seam is a deliberate hole in invariant 1: the one bounded
+      exception to "the agent reconfigures nothing". A human confirms it is
+      bounded — one initiator, one owner-rotation, one timelock, vetoable by the
+      account — and cannot become the bypass it exists to survive, before the
+      account relies on it.
+    rationale: >
+      ADR 0008 left the module path permitting swapOwner but bounded by nothing;
+      this slice adds the RecoveryController, the sole enabled module and the
+      timelocked, single-initiator user of that capability (ADR 0009). It closes
+      the residual S005 flagged — a lost SecondSign key can be replaced without the
+      replacement being indistinguishable from theft (C11) — while owner-rotation
+      stays the one sanctioned exception to the account-control denial (C3). The
+      single-initiator-plus-timelock model is the 2026-08-11 product decision;
+      M-of-N guardians is the documented later upgrade.
