@@ -539,7 +539,18 @@ to survive: both are a configuration change arriving through an unguarded path.
 Where a recovery mechanism has to take the module path, it must be on the module
 guard's explicit allowlist and constrained by a timelock, so that what the guard
 admits is a specific approved and unexpired recovery record rather than a class
-of caller.
+of caller. **`ONCHAIN-S010` builds this** (ADR 0009): the `RecoveryController`,
+enabled as the account's sole module, is the only path to the `swapOwner` the
+ADR-0008 module guard permits, and a narrow one — a single configured initiator,
+one owner-rotation, after a timelock the account itself (`execTransaction`) can
+veto, one-shot. The allowlist and timelock live in the controller, not the guard,
+which stays capability-based; because S005 freezes the module set at setup
+(`enableModule` is refused on both paths), the controller is permanently the only
+module that can reach `swapOwner`. Proven by executed transactions in
+`onchain/test/production/RecoveryController.t.sol`. The stated residual: a hostile
+recovery succeeds only if the cold recovery key is stolen **and** the agent
+colludes so the account's own veto is unreachable — two independent compromises;
+`M`-of-`N` guardians (a later upgrade) is the mitigation that closes even that.
 
 **The submitter identity a guard observes is not an authorisation.** A guard
 observes the address that invoked the guarded entry point, which is the submitter
