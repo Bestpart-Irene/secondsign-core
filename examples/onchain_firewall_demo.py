@@ -20,8 +20,9 @@ tools (``anvil``/``forge``/``cast``) on PATH; keys come from Anvil's own
     python examples/onchain_firewall_demo.py --out /tmp/ss-demo
     # writes result.json and firewall_demo.html into that directory
 
-This is a demonstration, not a production deployment: the on-chain production
-guard (ONCHAIN-S005), a KMS-held signing key, and a real Base run are still ahead.
+This is a demonstration, not a production deployment: the production guards
+(``onchain/src``, ONCHAIN-S005) are not installed on this Safe, and a KMS-held
+signing key and a real Base run are still ahead.
 """
 
 from __future__ import annotations
@@ -472,7 +473,7 @@ footer .caveat{{margin-top:10px;color:var(--muted);font-family:var(--sans);font-
 <div class="card"><div class="head"><h2>What the agent tried</h2><span class="bal">4 proposals</span></div>{rows}
 </div>
 <footer>real Safe 1.5.0 on local Anvil · real 2-of-2 execution · agent {agent} · SecondSign {secondsign}
-<p class="caveat">Every verdict, signature and balance change is produced by the actual co-signer, not mocked (only the ERC-20 is a local stand-in). A demonstration, not a production deployment: the on-chain production guard, a KMS-held key, and a Base run are still ahead.</p></footer>
+<p class="caveat">Every verdict, signature and balance change is produced by the actual co-signer, not mocked (only the ERC-20 is a local stand-in). A demonstration, not a production deployment: the production guards are not installed on this Safe, and a KMS-held key and a Base run are still ahead.</p></footer>
 </div></body></html>
 """
 
