@@ -247,6 +247,49 @@ approved by a second human, executed, and receipted — runs in
 against real test-mode Stripe in
 [`tests/e2e/test_vertical_path.py`](tests/e2e/test_vertical_path.py).
 
+## When the agent holds a wallet
+
+The same engine governs a second execution domain: an agent whose rail is a
+blockchain account. The account is a [Safe](https://safe.global) smart account
+owned 2-of-2 — the agent's key and SecondSign's co-signer — so the co-signer's
+signature **is** the ALLOW verdict. A refused proposal is simply never signed,
+and a transaction with one signature of two cannot execute. There is no
+separate enforcement step for the agent to skip.
+
+Before it signs anything, the co-signer re-reads the Safe's live state —
+owners, threshold, guard, nonce — and the token's on-chain identity, and
+refuses on any drift from what was configured. The signing key sits behind a
+provider contract, never in the co-signer itself. And on the chain, a pair of
+Solidity guards (a transaction guard and a module guard, Safe 1.5.0, under
+[`onchain/`](onchain/)) refuse by revert any transaction that would change the
+account's control — replace the guard, change owners or threshold, enable a
+module, delegatecall — on **both** Safe execution paths. The guards judge
+integrity only, never value: amounts and counterparties are the co-signer's
+decision, made off-chain by the same deterministic engine as everything above.
+
+SecondSign is not a wallet and takes no custody — it holds one key of two, and
+the account is yours. It issues no token, and no authorization may ever depend
+on holding one.
+
+Watch the co-signer at work against a real Safe on a local chain (needs
+[Foundry](https://getfoundry.sh)):
+
+```bash
+python examples/onchain_firewall_demo.py --out /tmp/ss-demo
+```
+
+Four proposals: a small transfer is co-signed and the USDC moves; a large one
+is held for a human and executes on approval; an unlimited `approve` to an
+unvouched spender gets no signature; and the agent's own attempt to remove
+SecondSign (`setGuard(0)`) gets no signature either. Every verdict and
+signature comes from the actual co-signer — only the ERC-20 is a local
+stand-in.
+
+This domain is younger than the fiat path and says so plainly: the contracts
+are unaudited, nothing has run beyond a local chain, and [Status](#status)
+names the rest. What it defends against, and why each rule exists:
+[On-chain threat model](docs/ONCHAIN_THREAT_MODEL.md).
+
 ## What it guarantees
 
 Each of these is a promise bound to the test that enforces it. See
@@ -267,7 +310,8 @@ Each of these is a promise bound to the test that enforces it. See
 
 ## Who it is for
 
-- A team about to hand an agent a payment, treasury or trading tool.
+- A team about to hand an agent a payment, treasury or trading tool — or the
+  keys to an on-chain account.
 - A fintech or vertical SaaS shipping agent features that need a control an
   auditor will accept.
 - Anyone who will one day have to answer: *what stopped it, and can you prove
@@ -299,21 +343,26 @@ Pre-1.0. Interfaces may still change.
 plugin boundary, intent, policy, the decision engine, maker-checker approval,
 the execution gateway, the hash-chained audit receipt, Stripe and Alpaca
 adapters, the conformance kits, and an adversarial matrix run against the threat
-model. Branch coverage is 100%, enforced by CI rather than asserted here — but
-read that as an engineering signal, not as evidence of security. It says every
-branch was executed by some test. It does not say the tests assert the right
-things, and it is not a substitute for the independent review this project has
-not yet had.
+model. Around it, the deployment shape: the standalone gateway process, the
+credential-free client distribution, the reference two-network topology, and a
+held `REVIEW` that reaches a human on a second mTLS channel the agent has no
+route to — and comes back as an executed payment when, and only when, that
+human approves. On the wallet side: the Safe co-signer path with live-chain
+re-verification before every signature, the signing key behind a provider
+contract, and the constitutional double guard in Solidity. Branch coverage is
+100%, enforced by CI rather than asserted here — but read that as an
+engineering signal, not as evidence of security. It says every branch was
+executed by some test. It does not say the tests assert the right things, and
+it is not a substitute for the independent review this project has not yet had.
 
-**Not there yet:** three things, named rather than rounded off.
-[`CORE-S019`](docs/slices/roadmap.yaml) has built the gateway process, the
-credential-free client distribution and the reference topology, so the
-no-bypass claim is now demonstrated by adversarial code rather than argued —
-but a policy that answers `REVIEW` has nothing behind it yet: no path presents a
-held payment to a human or carries an approval back. The control-plane state the
-gateway keeps (the principal fingerprint key, the spend window) lives in the
-process, so a restart forgets it. And spending limits are a constant in the
-gateway rather than state under an auditable authority. Running the library
+**Not there yet:** named rather than rounded off. The control-plane state the
+gateway keeps (the principal fingerprint key, the spend window, pending
+reviews) lives in the process, so a restart forgets it. Spending limits are a
+constant in the gateway rather than state under an auditable authority. And
+the on-chain path is younger than the fiat one: the contracts have had no
+independent audit, nothing has run beyond a local chain, the decided effect is
+still read from calldata rather than from simulation, and a bounded recovery
+path for a lost co-signer key is built but still in review. Running the library
 inside your agent's process remains right for development and testing, not for
 production custody of money.
 
@@ -326,7 +375,7 @@ hand-maintained: [`docs/slices/STATUS.md`](docs/slices/STATUS.md).
 |---|---|
 | [Architecture](docs/ARCHITECTURE.md) | What core is, and what it deliberately is not |
 | [Threat model](docs/THREAT_MODEL.md) | What this defends against, and why each rule exists |
-| [On-chain threat model](docs/ONCHAIN_THREAT_MODEL.md) | What changes when the agent holds a wallet — designed, not implemented |
+| [On-chain threat model](docs/ONCHAIN_THREAT_MODEL.md) | What changes when the agent holds a wallet, and what the guards must hold |
 | [Invariants](docs/INVARIANTS.md) | The guarantees, each bound to the test that enforces it |
 | [Extension contracts](docs/EXTENSION_CONTRACTS.md) | How to add a rail, rule or provider and certify it |
 | [Contributing](CONTRIBUTING.md) | The slice protocol and quality gates |
