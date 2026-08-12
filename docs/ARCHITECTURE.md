@@ -52,13 +52,16 @@ structurally unreachable from the managed agent (INV-12).
 - Multi-tenant backends, SSO, consoles, or billing.
 - Online learning or behavioural anomaly models on the live decision path.
 - Customer business logic.
-- On-chain execution. An agent that holds a wallet is a second domain with its
-  own threat numbering ([`ONCHAIN_THREAT_MODEL.md`](ONCHAIN_THREAT_MODEL.md))
-  and, when it is built, its own separately versioned contract surface — because
-  on-chain risk is a different language rather than a wider version of this one.
-  Today it is designed and queued, not implemented: no on-chain code ships in
-  this package, and the queue begins with a falsification checkpoint rather than
-  a build.
+- A frozen on-chain contract. An agent that holds a wallet is a second domain
+  with its own threat numbering
+  ([`ONCHAIN_THREAT_MODEL.md`](ONCHAIN_THREAT_MODEL.md)) and its own separately
+  versioned contract surface — because on-chain risk is a different language
+  rather than a wider version of this one. That domain now ships — the Safe
+  co-signer behind the gateway, live-chain re-verification before every
+  signature, and the Solidity guards under `onchain/` — but as an explicitly
+  **unfrozen** surface (`ONCHAIN_CONTRACT_VERSION == 0`): no v1 module imports
+  it, it is not re-exported from the top-level package, and nothing about it is
+  a compatibility promise yet.
 
 The last exclusion is deliberate and worth stating plainly: velocity and
 counterparty judgements are **deterministic policy**, not learned signals.
