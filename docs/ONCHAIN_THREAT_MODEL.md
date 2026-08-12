@@ -150,6 +150,18 @@ SecondSign is itself a co-signer or guard, "remove SecondSign" must be
 structurally inexpressible or permanently denied; a self-removal control that a
 setting can enable is not a control.
 
+The denial above is a policy decision at signing time; underneath it sits an
+on-chain floor that does not depend on the co-signer or the engine at all. The
+production double guard (`ONCHAIN-S005`, ADR 0008) refuses every account-control
+change on the agent's `execTransaction` path and the subverting ones on the module
+path — with the one exception of a threshold-preserving `swapOwner` on the module
+path, the recovery seam — and refuses `delegatecall` on both. Each of the four
+invariants (SecondSign stays a required signer, the threshold stays two, neither
+guard is removable, no value-moving or delegatecall module is enabled) is proven by
+an executed transaction that reverts at the guard's own reason, on both hooks
+(`onchain/test/production/ConstitutionalGuard.t.sol`). The guard enforces integrity,
+not value: it judges no amount or counterparty, so it holds with the engine offline.
+
 ### C4
 **The code can change after the decision.** Two paths. `delegatecall` executes
 external code in the caller's storage context and can rewrite any slot including
@@ -470,14 +482,17 @@ by count.
 | `C-RT-026` | Calldata rewritten after approval | Commitment comparison fails before signing, signature refused |
 
 **Known coverage gaps, stated rather than papered over.** C11 has no case in this
-matrix: bypassing the signing boundary is *to be* verified on chain by the
-topology assertions in `ONCHAIN-S001` — a slice that is designed but **not yet
-built**, so C11 is unverified today, not verified. A case for a change in guard
-configuration identity between decision and execution is owed, and lands with the
-slice that puts that identity into the commitment. The gap is wider than these
-two: as the matrix heading says, none of its cases execute yet, so every expected
-verdict above is a commitment this design must still be held to, not a result it
-has already produced.
+matrix: bypassing the signing boundary is verified on chain in two parts. The
+double-guard **topology** is falsified and confirmed on a local chain by
+`ONCHAIN-S001` (built and merged) — a single transaction guard leaves the module
+path open, two guards close it — and the **production guards** that enforce the
+four account-control invariants (C3) on both hooks, by executed refusal, are
+`ONCHAIN-S005` (`onchain/test/production/ConstitutionalGuard.t.sol`). What remains
+for C11 is the *identity* part: a case for a change in guard configuration between
+decision and execution, which lands with the slice that puts that identity into the
+commitment. The rest of the matrix is wider still: as the heading says, most of its
+cases do not execute yet, so those expected verdicts remain commitments this design
+must be held to, not results it has already produced.
 
 ## Technical assumptions and residual risks
 
