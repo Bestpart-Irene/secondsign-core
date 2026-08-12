@@ -349,7 +349,8 @@ held `REVIEW` that reaches a human on a second mTLS channel the agent has no
 route to — and comes back as an executed payment when, and only when, that
 human approves. On the wallet side: the Safe co-signer path with live-chain
 re-verification before every signature, the signing key behind a provider
-contract, and the constitutional double guard in Solidity. Branch coverage is
+contract, the constitutional double guard in Solidity, and a timelocked,
+account-vetoable recovery path for a lost co-signer key. Branch coverage is
 100%, enforced by CI rather than asserted here — but read that as an
 engineering signal, not as evidence of security. It says every branch was
 executed by some test. It does not say the tests assert the right things, and
@@ -360,9 +361,8 @@ gateway keeps (the principal fingerprint key, the spend window, pending
 reviews) lives in the process, so a restart forgets it. Spending limits are a
 constant in the gateway rather than state under an auditable authority. And
 the on-chain path is younger than the fiat one: the contracts have had no
-independent audit, nothing has run beyond a local chain, the decided effect is
-still read from calldata rather than from simulation, and a bounded recovery
-path for a lost co-signer key is built but still in review. Running the library
+independent audit, nothing has run beyond a local chain, and the decided
+effect is still read from calldata rather than from simulation. Running the library
 inside your agent's process remains right for development and testing, not for
 production custody of money.
 
