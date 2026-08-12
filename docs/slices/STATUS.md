@@ -13,20 +13,19 @@ it, or when a complete slice depends on it. It is **ready** when every
 dependency is complete and it is not. It is **blocked** otherwise. ⚑ marks a
 slice that stops for a human before it is marked done.
 
-## Ready to pick up (4)
+## Ready to pick up (3)
 
 | Slice | Title | Waiting on |
 |---|---|---|
 | `CORE-S018` ⚑ | Extension health and a declared degraded state | — |
 | `ONCHAIN-S003` ⚑ | Generalise the strictness algebra in a private kernel without moving the public surface | — |
 | `ONCHAIN-S006` | Effect by simulation — the decided effect read from execution, not from calldata | — |
-| `ONCHAIN-S010` ⚑ | The recovery controller — a bounded, timelocked user of the swapOwner capability | — |
 
 ## Blocked (0)
 
 Nothing is waiting on anything.
 
-## Complete (30)
+## Complete (31)
 
 | Slice | Title | Waiting on |
 |---|---|---|
@@ -60,6 +59,7 @@ Nothing is waiting on anything.
 | `ONCHAIN-S007` ⚑ | Re-verify the chain before signing, and pin the token identity | — |
 | `ONCHAIN-S008` | A live cast-backed ChainStateReader for the co-signer | — |
 | `ONCHAIN-S009` ⚑ | The signing key is a SignerProvider contract, not a raw key | — |
+| `ONCHAIN-S010` ⚑ | The recovery controller — a bounded, timelocked user of the swapOwner capability | — |
 
 ---
 
