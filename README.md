@@ -5,8 +5,9 @@
   </picture>
 </p>
 
-<p align="center"><b>Runtime authorization for financial AI agents.</b><br>
-The gate between an AI agent and real money.</p>
+<p align="center"><b>An independent transaction co-signer for AI agents that manage other people's money.</b><br>
+An out-of-mandate transaction is never signed, so it never happens — and every
+decision leaves evidence the operator could not have written for itself.</p>
 
 <p align="center">
   <a href="https://pypi.org/project/secondsign-core/"><img alt="PyPI" src="https://img.shields.io/pypi/v/secondsign-core.svg"></a>
@@ -113,6 +114,16 @@ agent is told to call first. All three share one flaw: **the agent decides
 whether to obey them.** Anything an agent can skip is not a control.
 
 SecondSign takes that decision away from the agent.
+
+And when the money an agent moves is not its operator's own — a client's
+treasury, user balances, a fund's capital — solving that first problem exposes
+a second one: **the owner of the money will eventually ask the operator to
+prove the agent stayed inside what was authorized.** Logs written by the same
+system that made the mistake do not answer that question; they are the
+operator grading its own homework. An independent co-signer answers it
+structurally: a transaction outside the mandate is never signed, so it never
+happens, and the trail of signed verdicts is evidence the operator could not
+have manufactured.
 
 ## What it is
 
@@ -268,8 +279,9 @@ integrity only, never value: amounts and counterparties are the co-signer's
 decision, made off-chain by the same deterministic engine as everything above.
 
 SecondSign is not a wallet and takes no custody — it holds one key of two, and
-the account is yours. It issues no token, and no authorization may ever depend
-on holding one.
+the account is yours: no funds move onto anyone's platform in order to be
+protected. It issues no token, and no authorization may ever depend on holding
+one.
 
 Watch the co-signer at work against a real Safe on a local chain (needs
 [Foundry](https://getfoundry.sh)):
@@ -310,15 +322,25 @@ Each of these is a promise bound to the test that enforces it. See
 
 ## Who it is for
 
-- A team about to hand an agent a payment, treasury or trading tool — or the
-  keys to an on-chain account.
+The sharpest fit is a team whose agents control money that belongs to someone
+else — where the capital's owner can ask, at any moment: *prove the agent
+stayed inside what I authorized*.
+
+- An operator running treasury, trading or DeFi agents over a client's or a
+  fund's capital.
+- An agentic-commerce or payments team whose agents touch user or merchant
+  balances.
+- A company selling agents into enterprises, where the deal stalls on *how
+  would we ever let this near production money?* — "every financial action
+  passes an independent co-signer the agent cannot bypass" is the answer that
+  unblocks it.
 - A fintech or vertical SaaS shipping agent features that need a control an
   auditor will accept.
-- Anyone who will one day have to answer: *what stopped it, and can you prove
-  it?*
 
-It is **not** a model-safety layer, a prompt filter, or an agent framework. It
-has one job, at one moment: the instant before money moves.
+The same boundary also protects a team spending its own budget from a
+prompt-injected or simply wrong agent — that is where many deployments start.
+It is **not** a wallet, a model-safety layer, a prompt filter, or an agent
+framework. It has one job, at one moment: the instant before money moves.
 
 ## Open core
 
@@ -330,6 +352,16 @@ has one job, at one moment: the instant before money moves.
 Two rules hold that line: core never depends on anything private, and an
 enterprise extension may only make a decision stricter — never grant a
 permission core would have refused.
+
+The split follows the trust model, not a feature ledger. The open core is the
+whole mechanism, and operated by your own team it is a strong internal
+control — but a co-signer you run yourself is still your own word, which your
+clients, auditors and insurers must take on faith. *Independence* — the
+co-signer operated by a party the agent's operator does not control, under a
+policy the capital owner is party to and that can only ever be tightened — is
+a property of who runs a deployment, never of code. That independently
+operated form is what the commercial layer exists to be: independence cannot
+be self-hosted.
 
 Extensions — a new rail, a policy plugin, an approval provider — prove they are
 safe by inheriting a conformance test suite, not by persuading a maintainer.
