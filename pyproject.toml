@@ -52,11 +52,11 @@ dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
     "ruff==0.16.2",
-    "hypothesis==6.165.2",
+    "hypothesis==6.165.3",
     "import-linter==2.13",
     "mypy==2.3.0",
     "pyyaml==6.0.3",
-    "stripe==15.4.0",
+    "stripe==15.5.0",
     "eth-account==0.13.7",
     # Generates the reference deployment's ephemeral PKI. Development only — it
     # is not a runtime dependency and must never become one; `[project]` keeps
