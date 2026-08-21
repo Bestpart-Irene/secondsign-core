@@ -51,10 +51,10 @@ onchain = ["eth-account>=0.13,<0.14"]
 dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
-    "ruff==0.16.2",
+    "ruff==0.16.3",
     "hypothesis==6.165.2",
     "import-linter==2.13",
-    "mypy==2.3.0",
+    "mypy==2.3.1",
     "pyyaml==6.0.3",
     "stripe==15.4.0",
     "eth-account==0.13.7",
