@@ -1,7 +1,7 @@
 [project]
 name = "secondsign-core"
 dynamic = ["version"]                       # read from src/secondsign/__init__.py
-description = "Runtime authorization for financial AI agents — the gate between an agent and real money"
+description = "Independent authorization and evidence for AI agents executing high-consequence transactions"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
