@@ -5,9 +5,9 @@
   </picture>
 </p>
 
-<p align="center"><b>An independent transaction co-signer for AI agents that manage other people's money.</b><br>
-An out-of-mandate transaction is never signed, so it never happens — and every
-decision leaves evidence the operator could not have written for itself.</p>
+<p align="center"><b>Independent authorization and evidence for AI agents executing high-consequence transactions.</b><br>
+SecondSign enforces the boundary before execution, then records exactly what was
+authorized. Wallets are one rail — not the product boundary.</p>
 
 <p align="center">
   <a href="https://pypi.org/project/secondsign-core/"><img alt="PyPI" src="https://img.shields.io/pypi/v/secondsign-core.svg"></a>
@@ -106,8 +106,9 @@ nothing moves. Details and the security properties of the topology:
 
 ## Why this exists
 
-Give an AI agent a payment tool and you have given it the ability to lose real
-money. A bad sentence can be retracted with an apology; a wrong wire cannot.
+Give an AI agent an execution tool and you have given it the ability to create
+an irreversible consequence. A bad sentence can be retracted with an apology;
+a wrong wire, trade or token transfer cannot.
 
 The usual answers are a better prompt, an eval suite, and a safety function the
 agent is told to call first. All three share one flaw: **the agent decides
@@ -115,20 +116,29 @@ whether to obey them.** Anything an agent can skip is not a control.
 
 SecondSign takes that decision away from the agent.
 
-And when the money an agent moves is not its operator's own — a client's
-treasury, user balances, a fund's capital — solving that first problem exposes
-a second one: **the owner of the money will eventually ask the operator to
-prove the agent stayed inside what was authorized.** Logs written by the same
-system that made the mistake do not answer that question; they are the
-operator grading its own homework. An independent co-signer answers it
-structurally: a transaction outside the mandate is never signed, so it never
-happens, and the trail of signed verdicts is evidence the operator could not
-have manufactured.
+Once an agent acts for a customer, a company or a capital owner, solving that
+first problem exposes a second one: **the party carrying the risk will
+eventually ask the operator to prove the agent stayed inside what was
+authorized.** Logs written by the same system that made the mistake do not
+answer that question; they are the operator grading its own homework.
+SecondSign makes enforcement primary and evidence its necessary by-product: an
+out-of-mandate action does not cross the execution boundary, and every decision
+binds the exact request that was authorized.
 
 ## What it is
 
-A gate that sits on the execution path. The agent can *ask* for money to move.
-Only SecondSign can *make* it move.
+An independent authorization and evidence layer on the execution path. The
+agent can propose an action. Only the boundary can authorize and dispatch it.
+
+The enforcement mechanism follows the rail: an execution gateway for API
+payments and brokerage, a transaction co-signer for a smart account, and a
+closed adapter for each new action domain. The invariant does not change: the
+agent must not possess another route to the irreversible effect.
+
+That separates category from wedge. The category is independent execution
+authorization and evidence. The current commercial product is an independently
+operated boundary for agents handling third-party capital. Agent wallets are
+the first product wedge.
 
 The agent holds no bank, broker or processor credential, and has no network
 route to them. Its only route to the money is a request to SecondSign, and
@@ -258,14 +268,15 @@ approved by a second human, executed, and receipted — runs in
 against real test-mode Stripe in
 [`tests/e2e/test_vertical_path.py`](tests/e2e/test_vertical_path.py).
 
-## When the agent holds a wallet
+## One rail: when the agent holds a wallet
 
-The same engine governs a second execution domain: an agent whose rail is a
-blockchain account. The account is a [Safe](https://safe.global) smart account
-owned 2-of-2 — the agent's key and SecondSign's co-signer — so the co-signer's
-signature **is** the ALLOW verdict. A refused proposal is simply never signed,
-and a transaction with one signature of two cannot execute. There is no
-separate enforcement step for the agent to skip.
+Wallets are the sharpest current product wedge, not SecondSign's category. The
+same authorization engine governs this execution domain: an agent whose rail
+is a blockchain account. The account is a [Safe](https://safe.global) smart
+account owned 2-of-2 — the agent's key and SecondSign's co-signer — so the
+co-signer's signature **is** the ALLOW verdict. A refused proposal is simply
+never signed, and a transaction with one signature of two cannot execute.
+There is no separate enforcement step for the agent to skip.
 
 Before it signs anything, the co-signer re-reads the Safe's live state —
 owners, threshold, guard, nonce — and the token's on-chain identity, and
@@ -322,9 +333,14 @@ Each of these is a promise bound to the test that enforces it. See
 
 ## Who it is for
 
-The sharpest fit is a team whose agents control money that belongs to someone
-else — where the capital's owner can ask, at any moment: *prove the agent
-stayed inside what I authorized*.
+SecondSign fits an agent deployment when three things are true: the action has
+a costly or irreversible consequence, every route to that consequence can be
+placed behind an execution boundary, and another party needs evidence of what
+was authorized.
+
+The sharpest current fit remains a team whose agents control money that belongs
+to someone else — where the capital's owner can ask, at any moment: *prove the
+agent stayed inside what I authorized*.
 
 - An operator running treasury, trading or DeFi agents over a client's or a
   fund's capital.
@@ -339,8 +355,26 @@ stayed inside what I authorized*.
 
 The same boundary also protects a team spending its own budget from a
 prompt-injected or simply wrong agent — that is where many deployments start.
-It is **not** a wallet, a model-safety layer, a prompt filter, or an agent
-framework. It has one job, at one moment: the instant before money moves.
+As closed adapters and execution boundaries are added, the same model can
+govern other high-consequence transaction rails. It is **not** a wallet, a
+model-safety layer, a prompt filter, an agent framework, or a passive monitoring
+tool. It has one job, at one moment: the instant before an irreversible action
+is executed.
+
+## What it does not underwrite
+
+SecondSign is not an insurance company and does not absorb an agent deployment's
+losses onto its own balance sheet. It supplies structural prevention and a
+hash-chained decision record: controls that can make a deployment's risk more
+bounded, explainable and potentially insurable.
+
+The operator still owns the agent, its integration and the consequences of
+actions allowed by its policy. The policy authority owns the boundary it sets;
+a named human owns an approval they give. SecondSign's responsibility is the
+narrower question of whether the execution boundary it supplies worked as
+specified. The resulting record narrows factual disputes about the request,
+verdict, approval and dispatch; contracts, applicable law and any actual
+insurance policy determine the final allocation of loss.
 
 ## Open core
 
@@ -354,14 +388,14 @@ enterprise extension may only make a decision stricter — never grant a
 permission core would have refused.
 
 The split follows the trust model, not a feature ledger. The open core is the
-whole mechanism, and operated by your own team it is a strong internal
-control — but a co-signer you run yourself is still your own word, which your
-clients, auditors and insurers must take on faith. *Independence* — the
-co-signer operated by a party the agent's operator does not control, under a
-policy the capital owner is party to and that can only ever be tightened — is
-a property of who runs a deployment, never of code. That independently
-operated form is what the commercial layer exists to be: independence cannot
-be self-hosted.
+whole mechanism, and operated by your own team it is a strong internal control
+— but an authorization boundary you run yourself is still your own word, which
+your clients, auditors and insurers must take on faith. *Independence* — the
+boundary operated by a party the agent's operator does not control, under a
+policy the risk owner is party to and that can only ever be tightened — is a
+property of who runs a deployment, never of code. That independently operated
+form is what the commercial layer exists to be: independence cannot be
+self-hosted.
 
 Extensions — a new rail, a policy plugin, an approval provider — prove they are
 safe by inheriting a conformance test suite, not by persuading a maintainer.

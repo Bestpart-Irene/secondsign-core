@@ -1,9 +1,16 @@
 # Architecture
 
 SecondSign Core is a **deterministic execution authorization kernel for
-financial AI agents.** It sits between an agent's intent and a bank, broker or
-custodian, and decides — reproducibly, and with a record — whether the action
-proceeds.
+high-consequence agent transactions.** It sits between an agent's intent and
+the system that can create the irreversible effect, and decides — reproducibly,
+and with a record — whether the action proceeds.
+
+The product category is broader than any one rail; the implemented domains are
+deliberately narrow. Payments, brokerage and smart-account transactions have
+closed intent models. A deployment is not protected until its corresponding
+executor or signing path is also the agent's sole route to the effect. A new
+domain is not supported until it has both. Wallets are one rail, not the
+architecture boundary.
 
 ## The path
 
