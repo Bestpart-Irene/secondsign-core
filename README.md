@@ -268,6 +268,19 @@ approved by a second human, executed, and receipted — runs in
 against real test-mode Stripe in
 [`tests/e2e/test_vertical_path.py`](tests/e2e/test_vertical_path.py).
 
+Every receipt is a link in a hash chain, and the chain leaves the system as a
+document an auditor re-verifies without trusting it:
+
+```bash
+python -m secondsign.audit.verify trail.json --expect-head <hash>
+```
+
+`export_trail` writes the canonical document; the verifier recomputes every
+link offline — no gateway, no network — and names the first broken sequence if
+the trail was edited, dropped, or reordered. `--expect-head` is the one check
+the chain cannot do alone: a head hash recorded out of band at export time,
+which catches a trail whose tail was silently truncated.
+
 ## One rail: when the agent holds a wallet
 
 Wallets are the sharpest current product wedge, not SecondSign's category. The

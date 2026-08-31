@@ -1197,3 +1197,43 @@ slices:
       outcome is the control for exactly that. The chain is a deterministic double
       (StaticChainStateReader); the judgement and the signature are real. The Solidity
       double guard is rendered and greyed out, never claimed as executed.
+
+  - id: CORE-S025
+    title: Export the audit trail, and verify it offline
+    depends_on: [CORE-S013]
+    threats: [A7]
+    scope:
+      - src/secondsign/audit/**
+      - tests/audit/**
+      - docs/**
+      - README.md
+    forbidden:
+      - a second implementation of the chain checks — the verifier delegates to the one in receipt.py
+      - network access anywhere in export or verification
+      - a new runtime dependency
+      - any field in the export beyond the receipt's already-redacted scalars
+    acceptance:
+      - an exported trail is loaded and re-verified by the CLI with exit code 0, with no running system and no network
+      - an edited field, a dropped receipt and a reordered pair each fail verification, naming the first broken sequence
+      - a truncated tail passes chain verification alone and fails when the expected head commitment is supplied
+      - export is deterministic — the same receipts produce byte-identical documents
+      - a document with an unknown format or version is refused, not partially read
+    required_tests: [unit]
+    gates: [ruff_check, ruff_format, pytest, lint_imports, validate_slices]
+    stop_for_human: false
+    checkpoint_reason: ""
+    rationale: >
+      verify_chain already makes tampering detectable, but only from inside a
+      Python process that holds the receipt objects — an auditor cannot run it.
+      This slice makes the existing guarantee demonstrable to a third party: a
+      canonical JSON export of a trail, and an offline verifier
+      (python -m secondsign.audit.verify) that recomputes the chain months later
+      without trusting the running system (A7 — proving a control was in force).
+      It adds no new verification logic: the three chain checks move into a
+      single first_break() that verify_chain delegates to, so there is exactly
+      one implementation for the CLI and the library to disagree about, which is
+      to say none. The one gap verify_chain documents — tail truncation survives
+      chain checks — is closed here by an explicit external commitment: the
+      verifier accepts an expected head hash and fails a trail that does not
+      reach it. Export carries only the receipt's already-redacted scalar
+      fields; nothing new crosses the boundary.
