@@ -1159,3 +1159,41 @@ slices:
       stays the one sanctioned exception to the account-control denial (C3). The
       single-initiator-plus-timelock model is the 2026-08-11 product decision;
       M-of-N guardians is the documented later upgrade.
+
+  - id: ONCHAIN-S011
+    title: The firewall panel — the on-chain decision path, made visible and interactive
+    depends_on: [ONCHAIN-S005, ONCHAIN-S007, ONCHAIN-S009]
+    threats: []
+    scope:
+      - examples/firewall_panel/**
+      - docs/**
+    forbidden:
+      - a verdict rendered by the panel that did not come from OnchainCosigner
+      - a policy threshold, allowlist, band or refusal reimplemented in the panel
+      - any change under src/secondsign/** or onchain/src/**
+      - claiming an executed on-chain guard refusal while the guards are not executed
+      - reading a private attribute of the co-signer, the reader or the policy
+    acceptance:
+      - every verdict the panel displays is the status of a real OnchainCosigner call, asserted by a consistency test over the whole scenario-by-knob matrix
+      - each tamper the panel offers produces its specific chain-drift reason code and refuses
+      - every preset scenario produces the verdict its own label advertises
+      - a held review approved by its proposer is refused, and by a different principal is signed
+      - the panel runs with no Foundry, no network and no RPC, and rebinds nothing outside 127.0.0.1
+    required_tests: [unit]
+    gates: [ruff_check, ruff_format, pytest, validate_slices]
+    stop_for_human: false
+    checkpoint_reason: ""
+    rationale: >
+      The co-signer already decides everything this panel shows — invisibly.
+      examples/onchain_firewall_demo.py proves the hard part on a real Safe, but it
+      is a batch run that emits a static report: it shows the verdict, not the
+      reasoning, cannot be re-aimed at a new question without a code edit, and needs
+      Foundry on PATH. This slice adds an interactive observer over the same shipped
+      decision path — seven stations from chain re-verification to the audit receipt,
+      a tamperable simulated account, and a real maker-checker queue — so the control
+      and the evidence can be seen rather than read about. It closes no threat and
+      adds no control; its own risk is misrepresentation — showing reasoning the
+      co-signer did not do — and the acceptance test that pins the trace to the real
+      outcome is the control for exactly that. The chain is a deterministic double
+      (StaticChainStateReader); the judgement and the signature are real. The Solidity
+      double guard is rendered and greyed out, never claimed as executed.

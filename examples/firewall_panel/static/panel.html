@@ -1,0 +1,80 @@
+<!doctype html>
+<!-- Copyright 2026 SecondSign contributors / SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SecondSign — the firewall panel</title>
+<link rel="stylesheet" href="/static/panel.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="eyebrow">SecondSign</div>
+    <h1>An agent wallet with a supervisor it cannot remove</h1>
+  </div>
+  <div class="grow"></div>
+  <div class="caveat">
+    The chain is <b>simulated</b>. The judgement and the signature are <b>real</b>,
+    produced by the shipped co-signer.
+  </div>
+  <button id="reset" style="padding:5px 12px">Reset</button>
+</header>
+
+<div class="knobs">
+  <span class="knob"><label for="cap">per-transaction cap</label>
+    <input id="cap" type="number" min="0" step="1"> <span>USDC</span></span>
+  <span class="knob"><label for="review">hold for a human above</label>
+    <input id="review" type="number" min="0" step="1"> <span>USDC</span></span>
+  <span class="knob" id="vouched-wrap">vouched spenders: <span id="vouched" class="mono"></span></span>
+</div>
+
+<main>
+  <!-- ① what the agent proposes ------------------------------------------ -->
+  <section>
+    <div class="card">
+      <div class="head"><h2>The agent proposes</h2><span class="note">pick one</span></div>
+      <div id="scenarios"></div>
+    </div>
+  </section>
+
+  <!-- ② the decision ------------------------------------------------------ -->
+  <section>
+    <div class="card">
+      <div class="head">
+        <h2>The decision</h2>
+        <span class="note" id="pipeline-note">nothing proposed yet</span>
+      </div>
+      <div id="verdict"></div>
+      <div id="pipeline"><p class="empty">Choose a proposal on the left to watch it pass through the co-signer.</p></div>
+    </div>
+  </section>
+
+  <!-- ③ the account, the queue, the evidence ------------------------------ -->
+  <section>
+    <div class="card">
+      <div class="head"><h2>The account</h2><span class="note" id="account-note"></span></div>
+      <div class="pad"><dl class="kv" id="account"></dl></div>
+    </div>
+
+    <div class="card">
+      <div class="head"><h2>Break it by hand</h2><span class="note">then propose again</span></div>
+      <div class="pad" id="tampers"></div>
+    </div>
+
+    <div class="card">
+      <div class="head"><h2>Held for a human</h2><span class="note" id="reviews-note"></span></div>
+      <div class="pad" id="reviews"></div>
+    </div>
+
+    <div class="card">
+      <div class="head"><h2>Evidence</h2><span class="note">written by the engine</span></div>
+      <div class="pad" id="audit"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/panel.js"></script>
+</body>
+</html>

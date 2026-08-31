@@ -13,13 +13,14 @@ it, or when a complete slice depends on it. It is **ready** when every
 dependency is complete and it is not. It is **blocked** otherwise. ⚑ marks a
 slice that stops for a human before it is marked done.
 
-## Ready to pick up (3)
+## Ready to pick up (4)
 
 | Slice | Title | Waiting on |
 |---|---|---|
 | `CORE-S018` ⚑ | Extension health and a declared degraded state | — |
 | `ONCHAIN-S003` ⚑ | Generalise the strictness algebra in a private kernel without moving the public surface | — |
 | `ONCHAIN-S006` | Effect by simulation — the decided effect read from execution, not from calldata | — |
+| `ONCHAIN-S011` | The firewall panel — the on-chain decision path, made visible and interactive | — |
 
 ## Blocked (0)
 
