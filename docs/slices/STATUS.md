@@ -18,15 +18,15 @@ slice that stops for a human before it is marked done.
 | Slice | Title | Waiting on |
 |---|---|---|
 | `CORE-S018` ⚑ | Extension health and a declared degraded state | — |
+| `CORE-S025` | Export the audit trail, and verify it offline | — |
 | `ONCHAIN-S003` ⚑ | Generalise the strictness algebra in a private kernel without moving the public surface | — |
 | `ONCHAIN-S006` | Effect by simulation — the decided effect read from execution, not from calldata | — |
-| `ONCHAIN-S011` | The firewall panel — the on-chain decision path, made visible and interactive | — |
 
 ## Blocked (0)
 
 Nothing is waiting on anything.
 
-## Complete (31)
+## Complete (32)
 
 | Slice | Title | Waiting on |
 |---|---|---|
@@ -61,6 +61,7 @@ Nothing is waiting on anything.
 | `ONCHAIN-S008` | A live cast-backed ChainStateReader for the co-signer | — |
 | `ONCHAIN-S009` ⚑ | The signing key is a SignerProvider contract, not a raw key | — |
 | `ONCHAIN-S010` ⚑ | The recovery controller — a bounded, timelocked user of the swapOwner capability | — |
+| `ONCHAIN-S011` | The firewall panel — the on-chain decision path, made visible and interactive | — |
 
 ---
 

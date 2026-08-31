@@ -95,6 +95,28 @@ def hash_of(receipt: AuditReceipt) -> str:
     )
 
 
+def first_break(receipts: tuple[AuditReceipt, ...]) -> int | None:
+    """The index of the first receipt that breaks the chain, or None if intact.
+
+    The same three checks as :func:`verify_chain` — the sequence runs, the
+    prev_hash links, and each stored hash matches a fresh recomputation — with
+    the failing position named instead of collapsed to a boolean. There is
+    exactly one implementation of the checks: `verify_chain` delegates here, so
+    a verifier that reports *where* a trail broke cannot drift from the one
+    that reports *whether* it did.
+    """
+    previous = GENESIS_HASH
+    for index, receipt in enumerate(receipts):
+        if receipt.sequence != index:
+            return index
+        if receipt.prev_hash != previous:
+            return index
+        if hash_of(receipt) != receipt.receipt_hash:
+            return index
+        previous = receipt.receipt_hash
+    return None
+
+
 def verify_chain(receipts: tuple[AuditReceipt, ...]) -> bool:
     """True iff the receipts form an intact chain from genesis.
 
@@ -105,15 +127,8 @@ def verify_chain(receipts: tuple[AuditReceipt, ...]) -> bool:
     One break this does *not* catch by itself is tail truncation — dropping the
     last receipts leaves a shorter but internally-valid chain. Detecting that
     requires an external commitment to the chain's head or length, held in the
-    control plane; it is not a property of the chain alone.
+    control plane; it is not a property of the chain alone. The offline
+    verifier (`secondsign.audit.verify`) closes it by accepting that
+    commitment as an input.
     """
-    previous = GENESIS_HASH
-    for index, receipt in enumerate(receipts):
-        if receipt.sequence != index:
-            return False
-        if receipt.prev_hash != previous:
-            return False
-        if hash_of(receipt) != receipt.receipt_hash:
-            return False
-        previous = receipt.receipt_hash
-    return True
+    return first_break(receipts) is None
